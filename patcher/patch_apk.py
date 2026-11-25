@@ -22,11 +22,22 @@ TOOLS = ROOT / "tools"
 PATCHER = ROOT / "patcher"
 PACKAGE = "com.pixelberrystudios.hssandroid"
 # Tweak releases stay on 1.0.x. Bump only VERSION_PATCH.
-VERSION_PATCH = 3
+VERSION_PATCH = 4
 VERSION_NAME = f"1.0.{VERSION_PATCH}"
 # 1.0.0 -> 10000. The store build is versionCode 200, so this always sorts after it.
 VERSION_CODE = 10000 + VERSION_PATCH
-APK_NAME = f"High-School-Story-{VERSION_NAME}.apk"
+GAME_VERSION = "5.4.0"
+# Release assets: the modded build and the untouched original side by side.
+APK_NAME = f"High-School-Story_{GAME_VERSION}_RR-Mod_{VERSION_NAME}.apk"
+ORIGINAL_NAME = f"High-School-Story_{GAME_VERSION}_original.apk"
+# One permanent key signs every build, so each release installs over the last
+# and keeps the save. Locally it is build/offline.keystore (restored from the
+# gitignored signing/offline.keystore copy if build/ was wiped); CI writes the
+# SIGNING_KEYSTORE_B64 secret there and passes SIGNING_PASSWORD.
+KEYSTORE = Path(os.environ.get("SIGNING_KEYSTORE") or ROOT / "build" / "offline.keystore")
+KEYSTORE_COPY = ROOT / "signing" / "offline.keystore"
+KEY_PASSWORD = os.environ.get("SIGNING_PASSWORD") or "android"
+KEY_ALIAS = os.environ.get("SIGNING_ALIAS") or "hss"
 EXTRA_SMALI = (
     "ModernCompat.smali",
     "OfflineMenu.smali",
@@ -427,24 +438,34 @@ def main() -> int:
 
     unsigned = args.work.parent / "unsigned.apk"
     run([str(java), "-Xmx3g", "-jar", str(apktool), "b", str(args.work), "-o", str(unsigned)])
-    keystore = args.work.parent / "offline.keystore"
+    keystore = KEYSTORE
+    if not keystore.exists() and KEYSTORE_COPY.exists() and "SIGNING_KEYSTORE" not in os.environ:
+        keystore.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(KEYSTORE_COPY, keystore)
     if not keystore.exists():
+        if os.environ.get("CI"):
+            sys.exit(f"{keystore} is missing. Set the SIGNING_KEYSTORE_B64 and SIGNING_PASSWORD secrets.")
+        # First local build only: create the permanent key and keep a copy.
+        keystore.parent.mkdir(parents=True, exist_ok=True)
         keytool = Path(java).with_name("keytool")
         run(
             [
-                str(keytool), "-genkeypair", "-keystore", str(keystore), "-alias", "hss",
+                str(keytool), "-genkeypair", "-keystore", str(keystore), "-alias", KEY_ALIAS,
                 "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000",
-                "-storepass", "android", "-keypass", "android",
+                "-storepass", KEY_PASSWORD, "-keypass", KEY_PASSWORD,
                 "-dname", "CN=High School Story Offline, O=Local, C=US",
             ]
         )
+    if not KEYSTORE_COPY.exists() and not os.environ.get("CI"):
+        KEYSTORE_COPY.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(keystore, KEYSTORE_COPY)
     signed_dir = args.work.parent / "signed"
     if signed_dir.exists():
         shutil.rmtree(signed_dir)
     run(
         [
             str(java), "-jar", str(signer), "-a", str(unsigned),
-            "--ks", str(keystore), "--ksAlias", "hss", "--ksPass", "android", "--ksKeyPass", "android",
+            "--ks", str(keystore), "--ksAlias", KEY_ALIAS, "--ksPass", KEY_PASSWORD, "--ksKeyPass", KEY_PASSWORD,
             "-o", str(signed_dir),
         ]
     )

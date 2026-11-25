@@ -198,4 +198,4 @@ Phone: LG Wing, Android 10, not rooted.
 - 1.0.0 (fresh install, 2026-11-25): new game started with no network to Pixelberry, character creation, hangouts, admissions and the scripted tutorial ran through to level 2 and the first "More Decor" quest. Settings → SETTINGS → GENERAL shows RR MOD. Tapping it aborted the process (stack alignment, above).
 - 1.0.1 installed over 1.0.0 with the same key; the level-2 save loaded.
 - 1.0.2: opening the currency store from "buy more currency" crashed in `StoreItem::configureIconSprite` (the forced `isCurrencyItemVisible`, above).
-- 1.0.3 installed; the RR MOD tab and a store buy have not been exercised on it yet.
+- 1.0.3 and 1.0.4 (same code, new file name and signing setup) installed as updates; the RR MOD tab and a store buy have not been exercised on them yet.
