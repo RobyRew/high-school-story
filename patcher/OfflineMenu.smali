@@ -21,8 +21,28 @@
 .method public static action(I)V
     .locals 4
 
+    const-string v0, "RRMod"
+
+    new-instance v1, Ljava/lang/StringBuilder;
+
+    invoke-direct {v1}, Ljava/lang/StringBuilder;-><init>()V
+
+    const-string v2, "action "
+
+    invoke-virtual {v1, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+
+    invoke-virtual {v1, p0}, Ljava/lang/StringBuilder;->append(I)Ljava/lang/StringBuilder;
+
+    invoke-virtual {v1}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
+
+    move-result-object v1
+
+    invoke-static {v0, v1}, Landroid/util/Log;->i(Ljava/lang/String;Ljava/lang/String;)I
+
     :try_start_0
-    sget-object v0, Lcom/pixelberrystudios/iab/BaseIabActivity;->i:Lcom/pixelberrystudios/iab/BaseIabActivity;
+    invoke-static {}, Lcom/pixelberrystudios/iab/BaseIabActivity;->getInstance()Lcom/pixelberrystudios/iab/BaseIabActivity;
+
+    move-result-object v0
 
     if-eqz v0, :done
 
@@ -105,9 +125,20 @@
     :credit
     invoke-static {v2, v3}, Lcom/pixelberrystudios/darthkitty/DKSponsorPay;->DKSponsorPayOnChangeStatusError(II)V
     :try_end_0
-    .catch Ljava/lang/Throwable; {:try_start_0 .. :try_end_0} :done
+    .catch Ljava/lang/Throwable; {:try_start_0 .. :try_end_0} :failed
 
     :done
+    return-void
+
+    :failed
+    move-exception v0
+
+    const-string v1, "RRMod"
+
+    const-string v2, "action failed"
+
+    invoke-static {v1, v2, v0}, Landroid/util/Log;->w(Ljava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;)I
+
     return-void
 .end method
 

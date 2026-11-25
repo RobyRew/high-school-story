@@ -136,7 +136,7 @@ The settings dialog (`SettingsDialogState::onInit`, `0x3B9A54`) builds its tabs 
 
 - `0x3B9C34` (`movs r3, #0xa4; mov r1, sb; str r4, [r1, r3]`, right after the ALERTS tab) is `bl 0x368104; nop`. The cave at `0x368104` (inside a dead `DKLeanPlumManager::track` body) runs those three instructions, loads `rr_mod_card.ccb`, stores the dialog at card `+0x15C` like the other cards, and adds and enables the tab.
 - `assets/rr_mod_card.ccb` is written by `patcher/rr_card.py` from the game's `android_settings_card.ccb`. The `.ccb` files are `darthkitty.Proto.CcbNode` protobufs (field numbers read from the descriptor in `libHSS.so`: 7 member name, 9 position, 11/12 scale, 17 tag, 59 custom class, 62 label, 63–65 sprites, 67 selector, 69 children). The card keeps the settings card's three `LinenDarkest9Slice` panels, `freshman_title_18_font` titles and `button_generic06` buttons. Root class stays `SettingsCard` so selectors resolve on it, and `SettingsCard::init` is not called for it.
-- Every RR button has selector `aboutButtonCallback` and a node tag. `aboutButtonCallback` (`0x49E434`) now starts with `b.w 0x369068`. That cave reads `sender->m_nTag` (`CCNode +0x7C`); 0 (the real ABOUT button) or a null sender runs the two relocated prologue instructions and returns to `0x49E438`. Tags 1..8 call `OfflineMenu.action(int)` via `JniHelper::getStaticMethodInfo` (`0x35E970`) and `CallStaticVoidMethod` (`JNIEnv` `+0x238`).
+- Every RR button has selector `aboutButtonCallback` and a node tag. `aboutButtonCallback` (`0x49E434`) now starts with `b.w 0x369068`. That cave reads `sender->m_nTag` (`CCNode +0x7C`); 0 (the real ABOUT button) or a null sender runs the two relocated prologue instructions and returns to `0x49E438`. Tags 1..8 call `OfflineMenu.action(int)` via `JniHelper::getStaticMethodInfo` (`0x35E970`) and `CallStaticVoidMethod` (`JNIEnv` `+0x234`, index 141; 1.0.2–1.0.4 used `+0x238`, the `va_list` variant `CallStaticVoidMethodV`, and the tag in `r3` was read as a `va_list` pointer).
 
 | Tag | Button | Java |
 | --- | --- | --- |
@@ -149,7 +149,7 @@ The settings dialog (`SettingsDialogState::onInit`, `0x3B9A54`) builds its tabs 
 | 7 | EXPORT | file picker on the UI thread |
 | 8 | IMPORT | file picker on the UI thread |
 
-`action` runs on the cocos thread and calls the grant dispatcher directly, so the HUD counters move without a separate dialog.
+`action` runs on the cocos thread and calls the grant dispatcher directly, so the HUD counters move without a separate dialog. It reads the activity through the public `BaseIabActivity.getInstance()`: the field `BaseIabActivity.i` is package-private, and reading it from `com.pixelberrystudios.hssandroid.OfflineMenu` threw `IllegalAccessError` in 1.0.5 and 1.0.6 (caught and logged under the `RRMod` tag since 1.0.6).
 
 The cave frames keep `sp` 8-byte aligned (`push {r4, r5, r6, lr}` + `sub sp, #16`; the tab cave `push {r4, lr}` + `sub sp, #8`). In 1.0.0 the menu cave used the HWU layout (`push {r4, lr}` + `sub sp, #12`, sp off by 4) and tapping it faulted inside ART's `JNI::FindClass` (`FindClass+50` from `getStaticMethodInfo+72`). The local `purchase` stub had the same misalignment (`push {r4, r5, lr}`) and pushes four registers since 1.0.1. On the same phone the HWU 1.0.20 build faulted at the same `FindClass+50` from its `onServerTimeFailure` cave.
 
@@ -198,4 +198,7 @@ Phone: LG Wing, Android 10, not rooted.
 - 1.0.0 (fresh install, 2026-11-25): new game started with no network to Pixelberry, character creation, hangouts, admissions and the scripted tutorial ran through to level 2 and the first "More Decor" quest. Settings → SETTINGS → GENERAL shows RR MOD. Tapping it aborted the process (stack alignment, above).
 - 1.0.1 installed over 1.0.0 with the same key; the level-2 save loaded.
 - 1.0.2: opening the currency store from "buy more currency" crashed in `StoreItem::configureIconSprite` (the forced `isCurrencyItemVisible`, above).
-- 1.0.3 and 1.0.4 (same code, new file name and signing setup) installed as updates; the RR MOD tab and a store buy have not been exercised on them yet.
+- 1.0.3 and 1.0.4 (same code, new file name and signing setup) installed as updates.
+- 1.0.4: the RR MOD tab showed under ALERTS (the tab column scrolls). A button tap reached `getStaticMethodInfo` without the 1.0.0 fault, then aborted in `CallStaticVoidMethodV` (wrong JNI slot, above).
+- 1.0.6: `action` logged `IllegalAccessError` on `BaseIabActivity.i` (above).
+- 1.0.7: the six grant buttons logged `action 1`..`action 6`; the HUD then showed 300,000,640 coins, 2,000,016 rings, 100,001 books and level 3. The currency store opened with prices; a store buy is not yet observed (input from another hand overlapped it).

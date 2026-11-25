@@ -389,7 +389,10 @@ def action_cave() -> bytes:
     a.emit(_hw(0x9A02))  # ldr r2, [sp, #8]   method
     a.emit(_mov_low(3, 6))  # tag, the one vararg
     a.emit(_ldr_imm(4, 0, 0))
-    a.emit(_movs_imm(5, 0x8E))
+    # JNINativeInterface index 141 (+0x234) is CallStaticVoidMethod(env, cls, mid, ...).
+    # 142 (+0x238) is the va_list variant; 1.0.2-1.0.4 called that one, and ART
+    # read the tag in r3 as a va_list pointer and faulted.
+    a.emit(_movs_imm(5, 0x8D))
     a.emit(_hw(0x00AD))  # lsls r5, r5, #2   CallStaticVoidMethod
     a.emit(_hw(0x5965))  # ldr r5, [r4, r5]
     a.emit(_hw(0x47A8))  # blx r5

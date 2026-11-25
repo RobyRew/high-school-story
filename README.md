@@ -78,6 +78,10 @@ Pixelberry's servers for High School Story are gone. The last Android client, 5.
 Every wallet the game has can be topped up: coins, rings (the premium currency), books, pencils, tickets and XP. Tap a button as often as you like.
 
 <div align="center">
+<img src="docs/images/rr-mod-tab.jpg" alt="The RR MOD tab in the game's Settings dialog with Currency, Supplies and Progress sections" width="80%">
+</div>
+
+<div align="center">
 <img src="docs/images/new-game.jpg" alt="Character creation on a new game, with no Pixelberry servers" width="70%">
 </div>
 

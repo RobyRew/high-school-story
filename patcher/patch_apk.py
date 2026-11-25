@@ -22,7 +22,7 @@ TOOLS = ROOT / "tools"
 PATCHER = ROOT / "patcher"
 PACKAGE = "com.pixelberrystudios.hssandroid"
 # Tweak releases stay on 1.0.x. Bump only VERSION_PATCH.
-VERSION_PATCH = 4
+VERSION_PATCH = 7
 VERSION_NAME = f"1.0.{VERSION_PATCH}"
 # 1.0.0 -> 10000. The store build is versionCode 200, so this always sorts after it.
 VERSION_CODE = 10000 + VERSION_PATCH
