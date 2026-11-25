@@ -67,6 +67,20 @@ BUILDING_KEY_VTABLE_GOT = 0x96C6AC  # R_ARM_RELATIVE slot holding _ZTVN3HSS11Bui
 # +0x1C listener std::list. GameState +0x38/+0x3C = buildings / count.
 # Building +0x20 type, +0x24 id, +0x2C level, +0x3C has-bits (4 = level set),
 # exactly as BuildingLogic::purchaseUpgrade (0x3CBAE8) writes them.
+# Max actions during the tutorial: the tutorial's "level up" steps wait for a
+# character that is not at max level yet (HWU soft-locked there). The game's own
+# TutorialLogic::stopTutorial() runs first when a tutorial is active.
+VT_GET_TUTORIAL_LOGIC = 0x74  # LogicManager vtable
+TUTORIAL_STATE = 0x2C  # TutorialLogic -> TutorialState (as SettingsDialogState::onInit reads it)
+IS_TUTORIAL_ACTIVE = 0x3FBE7C  # TutorialState::isTutorialActive() const
+STOP_TUTORIAL = 0x40078C  # TutorialLogic::stopTutorial()
+# ThumbnailTextureCache::createCharacterTypeSprite(type, gender) returned NULL when
+# the type's thumbnail texture is not in the APK, and callers such as
+# CharacterThumbnail::setStoreImage (admissions HUD after buying a classmate)
+# dereference it. The missing-texture branch now returns an empty sprite.
+CHARACTER_SPRITE_MISSING = 0x4B538C  # movs r4, #0; b 0x4B5376
+CHARACTER_SPRITE_RETURN = 0x4B5376
+SPRITE_WITH_SPRITE_FRAME = 0x5F5EA0  # CCSprite::spriteWithSpriteFrame(frame); NULL -> empty via the guard
 EMIT_ACTION_RUSHED = 0x42B784  # TelemetryHelper::emitActionRushed, 0x750 bytes of telemetry only
 SPECIAL_CAVE = 0x42B788  # its body, after the bx lr written at the entry
 SPECIAL_CAVE_END = 0x42BED4
@@ -260,6 +274,11 @@ EXPECTED = {
     CHARACTER_STATE_BUY: "079a0123",  # ldr r2, [sp, #0x1c]; movs r3, #1
     CLAMP_CAVE_END: "f8b5041c",  # next function, must stay untouched
     EMIT_ACTION_RUSHED: "f0b55646",
+    IS_TUTORIAL_ACTIVE: "10b58823",
+    STOP_TUTORIAL: "f8b50021",
+    CHARACTER_SPRITE_MISSING: "0024f2e7",
+    CHARACTER_SPRITE_RETURN: "104b0198",
+    SPRITE_WITH_SPRITE_FRAME: "38b5051c",
     SPECIAL_CAVE_END: "7047c046",  # TelemetryManager::onLinkError, must stay untouched
     SKILL_LEVELS_TO_MAX: "10b50c1c",
     ADD_SKILL_POINTS: "f0b55f46",
@@ -468,15 +487,56 @@ def offset_tables() -> tuple[bytes, int, int]:
 def grant_entry() -> bytes:
     """JNI DKSponsorPayOnChangeStatusError(int wallet, int amount).
 
-    Wallets 0..7 go to the grant dispatcher, 8 and 9 (max friends, max
-    buildings) to the routine in the emitActionRushed body.
+    Wallets 0..6 tail-call the grant dispatcher. 7..9 (max level, max friends,
+    max buildings) first stop an active tutorial through the game's own
+    TutorialLogic::stopTutorial(), then call the dispatcher (7) or the
+    special routine (8, 9).
     """
     a = _Asm(GRANT)
+    a.emit(_cmp_imm(2, 7))
+    a.branch("ge", "staged")
+    a.emit(_b_wide(a.here(), GRANT_CAVE))
+    a.mark("staged")
+    a.emit(_hw(0xB570))  # push {r4, r5, r6, lr}
+    a.emit(_mov_low(5, 2))
+    a.emit(_mov_low(6, 3))
+    a.bl(SHARED_LOGIC_MANAGER)
+    a.emit(_ldr_imm(3, 0, 0))
+    a.emit(_ldr_imm(3, 3, VT_GET_TUTORIAL_LOGIC))
+    a.emit(_hw(0x4798))  # blx r3
+    a.emit(_cmp_imm(0, 0))
+    a.branch("eq", "go")
+    a.emit(_mov_low(4, 0))
+    a.emit(_ldr_imm(0, 4, TUTORIAL_STATE))
+    a.bl(IS_TUTORIAL_ACTIVE)
+    a.emit(_cmp_imm(0, 0))
+    a.branch("eq", "go")
+    a.emit(_mov_low(0, 4))
+    a.bl(STOP_TUTORIAL)
+    a.mark("go")
+    a.emit(_mov_low(2, 5))
+    a.emit(_mov_low(3, 6))
     a.emit(_cmp_imm(2, 8))
     a.branch("ge", "special")
-    a.emit(_b_wide(a.here(), GRANT_CAVE))
+    a.bl(GRANT_CAVE)
+    a.branch("al", "out")
     a.mark("special")
-    a.emit(_b_wide(a.here(), SPECIAL_CAVE))
+    a.bl(SPECIAL_CAVE)
+    a.mark("out")
+    a.emit(_hw(0xBD70))  # pop {r4, r5, r6, pc}
+    blob = a.finish()
+    if GRANT + len(blob) > GRANT_END:
+        raise RuntimeError(f"grant entry is {len(blob)} bytes, room for {GRANT_END - GRANT}")
+    return blob
+
+
+def character_sprite_fallback(at: int) -> bytes:
+    """Missing thumbnail texture: r4 = CCSprite::spriteWithSpriteFrame(NULL), an empty sprite."""
+    a = _Asm(at)
+    a.emit(_movs_imm(0, 0))
+    a.bl(SPRITE_WITH_SPRITE_FRAME)
+    a.emit(_mov_low(4, 0))
+    a.emit(_b_wide(a.here(), CHARACTER_SPRITE_RETURN))
     return a.finish()
 
 
@@ -912,7 +972,15 @@ def patch_libhss(path: Path) -> None:
     put(LEVEL_CAVE, level_routine())
     put(GRANT, grant_entry())
     put(EMIT_ACTION_RUSHED, BX_LR)
-    put(SPECIAL_CAVE, special_routine())
+    special = special_routine()
+    put(SPECIAL_CAVE, special)
+    fallback_at = SPECIAL_CAVE + len(special)
+    fallback_at += fallback_at & 2  # keep 4-aligned like the other caves
+    fallback = character_sprite_fallback(fallback_at)
+    if fallback_at + len(fallback) > SPECIAL_CAVE_END:
+        raise RuntimeError("character sprite fallback does not fit")
+    put(fallback_at, fallback)
+    put(CHARACTER_SPRITE_MISSING, _b_wide(CHARACTER_SPRITE_MISSING, fallback_at))
     clamps, entries = clamp_stubs()
     put(CLAMP_CAVE, clamps)
     for setter, stub in entries.items():

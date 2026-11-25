@@ -20,7 +20,7 @@ High School Story 5.4.0 rebuilt to run on the phone alone.
 **Unlocked**
 - Store-card locks: *Unlocks with Quest …*, level- and building-gated classmates, the Decor tab, makeovers, date-locked clothes
 - Hidden and seasonal content listed and buyable: hidden classmate types, celebrities (Monster High, Lea Michele), quest and event clothes, expired offers and bundles
-- A store item whose icon is not in the APK shows an empty picture instead of crashing
+- A store item or classmate whose picture is not in the APK shows an empty picture instead of crashing
 
 **RR MOD tab** — a fourth tab in the game's own Settings dialog, drawn with the game's panels, fonts and buttons
 
@@ -34,6 +34,7 @@ High School Story 5.4.0 rebuilt to run on the phone alone.
 - **+1 LEVEL** adds exactly the XP to the next level; **MAX LEVEL** the XP to the last one
 - **MAX FRIENDS** raises every classmate to the top skill level; **MAX BUILDINGS** every building to its top upgrade
 - **UNLOCK ALL** adds 100,000,000 of every currency, then runs MAX LEVEL, MAX FRIENDS and MAX BUILDINGS
+- MAX LEVEL, MAX FRIENDS, MAX BUILDINGS and UNLOCK ALL end a running tutorial first (the game's own stop), so its "level up" steps cannot get stuck
 - Every wallet (coins, rings, books, pencils, tickets, XP) is capped at 2,000,000,000 — for grants and for the game's own income
 - **EXPORT / IMPORT** the real save (`files/`, `shared_prefs/`, `databases/`) as a JSON file
 

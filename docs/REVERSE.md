@@ -98,6 +98,8 @@ The first three were neutralised because on Hollywood U they aborted the process
 | `bl` to the reward scene in `handlePostPurchaseFlow` | `0x3C22F2` | two nops |
 | `HUD::animateIcon` empty-sequence branch | `0x476C86` | `beq 0x476D2E` → `beq 0x476D5E` (epilogue) |
 
+`ThumbnailTextureCache::createCharacterTypeSprite(type, gender)` (`0x4B5358`) returned NULL when the type's thumbnail texture is not in the APK (`CCTextureCache::addImage` fails), and `CharacterThumbnail::setStoreImage` (`0x456A1C`) dereferences the result at `0x456A46`. A fresh game crashed there from the admissions HUD (`AdmissionsBuildingHudState::addMenuItems` → `HUDIcon::setCharacter`) right after buying a classmate. The missing-texture branch at `0x4B538C` now branches to a stub after the special routine that returns `CCSprite::spriteWithSpriteFrame(NULL)`, an empty sprite through the NULL-frame guard, and rejoins at `0x4B5376`.
+
 `HUD::animateIcon(double, CCNode*)` (`0x476BD0`) builds a pulse sequence whose step count comes from its `double` argument. With zero steps `CCSequence::actionsWithArray` returns NULL and `str r1, [r0, #0x1c]` faults. A local buy reached it through `PlayerLogic::credit` → `HUD::onCurrencyEarned` (tombstone in test build 10009); the empty case now returns.
 
 ## Store-card locks
@@ -183,7 +185,7 @@ The SponsorPay offer wall is dead. Its three JNI status callbacks are contiguous
 | `…DKSponsorPayOnChangeStatusCloseAborted` | `0x3690C0` | strings of the action cave |
 | `…DKSponsorPayOnChangeStatusError` | `0x369118` | grant entry; ends before `0x369170` (`DKSponsorPay::~DKSponsorPay`) |
 
-JNI resolves natives by short name, so the smali declaration of `DKSponsorPayOnChangeStatusError` was changed to `(II)V`: `r2` = wallet, `r3` = amount. The entry is `cmp r2, #8; bge special; b.w 0x368020; special: b.w 0x42B788`. The four Java calls to the old status callbacks in `PBNativeActivity.onActivityResult` (request code 100) are removed, and the patcher stops if any other smali still calls them.
+JNI resolves natives by short name, so the smali declaration of `DKSponsorPayOnChangeStatusError` was changed to `(II)V`: `r2` = wallet, `r3` = amount. Wallets 0..6 tail-call the dispatcher (`b.w 0x368020`). Wallets 7..9 first get `TutorialLogic` (`LogicManager` vtable `+0x74`); if `TutorialState::isTutorialActive()` (`0x3FBE7C`, state at `TutorialLogic +0x2C`) is true they call the game's `TutorialLogic::stopTutorial()` (`0x40078C`), then `bl` the dispatcher (7) or the special routine at `0x42B788` (8, 9). Maxing the player or the characters mid-tutorial soft-locked Hollywood U's "level up" tutorial step, which waits for a character that is not at max level yet. The four Java calls to the old status callbacks in `PBNativeActivity.onActivityResult` (request code 100) are removed, and the patcher stops if any other smali still calls them.
 
 The dispatcher (`0x368020`) null-checks `sharedManager()` and `getPlayerLogic()` (`+0x4C`):
 
@@ -242,3 +244,4 @@ Phone: LG Wing, Android 10, not rooted. Test builds are named by their versionCo
 - 10010: the same ring-pack buy completed with no crash.
 - 1.0.0 (versionCode 10100) installed over 10010; the level-40 save loaded and the tab showed the fourth row. MAX BUILDINGS and MAX FRIENDS ran with no crash and no `RRMod` failure (their effect on the save not yet inspected).
 - 1.0.0 fresh game (after `pm clear com.pixelberrystudios.hssandroid`, with the save backed up through a `--debuggable` build and `run-as`): character creation and the opening tutorial ran; the RR MOD tab opened mid-tutorial; UNLOCK ALL took the new game to level 40 with every wallet at 2,000,000,000; the tutorial continued into "Enroll a friend!" with the classmate store open. No crash.
+- 1.0.0 fresh game, continued: after UNLOCK ALL mid-tutorial and buying a classmate, the admissions HUD crashed in `CharacterThumbnail::setStoreImage` (NULL thumbnail sprite, above). Fixed in the same 1.0.0 build together with the tutorial stop; the reproduction on the fixed build is pending.
