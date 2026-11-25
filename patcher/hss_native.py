@@ -60,7 +60,6 @@ CLOTHING_NETWORK_BNE = 0x45AA68  # ClothingStoreCard::initWithItems
 CURRENCY_EARNED_SOUND = 0x41B720  # SoundManager::onCurrencyEarned
 CREDIT_PURCHASE_SOUND = 0x3F6154  # bl SoundManager::playEffect inside creditPurchase
 EMIT_TELEMETRY = 0x42DCC0  # TelemetryManager::emitTelemetryEvent
-CURRENCY_ITEM_VISIBLE = 0x3F5D2C  # StoreLogic::isCurrencyItemVisible (sale-date checks)
 LEANPLUM_TRACK = {  # DKLeanPlumManager::track overloads
     0x367FA8: "30b5",
     0x368010: "f0b5",
@@ -98,13 +97,37 @@ TEST_PURCHASE_REQUIREMENTS = {
 }
 
 # --- RR Mod Settings ---------------------------------------------------------------
+# The settings dialog gets a fourth tab, RR MOD, next to HELP / SETTINGS / ALERTS.
+# Its card is assets/rr_mod_card.ccb (written by patch_apk.py from the game's own
+# android_settings_card.ccb), a SettingsCard whose buttons all call
+# aboutButtonCallback with node tags 1..8. The callback cave passes a non-zero
+# tag to Java OfflineMenu.action(int); tag 0 (the real ABOUT button) runs the
+# original callback.
 ABOUT_BUTTON = 0x49E434  # Settings::SettingsCard::aboutButtonCallback
+ABOUT_RESUME = 0x49E438  # after the two relocated prologue instructions
+CCNODE_TAG = 0x7C  # cocos2d::CCNode::getTag is ldr r0, [r0, #0x7c]
+# SettingsDialogState::onInit, right after the ALERTS tab is added and enabled:
+# movs r3, #0xa4; mov r1, sb; str r4, [r1, r3]  (stores the alerts card)
+TAB_SPLICE = 0x3B9C34
+SHARED_BUILDER = 0x61082C  # cocos2d::CCBuilder::sharedBuilder
+NODE_GRAPH = 0x6109F4  # CCBuilder::nodeGraphWithFile(const char*, CCBuilderNode*, bool)
+ADD_TAB = 0x4B6510  # Tabs::TabbedDialog::addTab(label, icon, node, bool)
+SET_TAB_ENABLED = 0x4B6578  # Tabs::TabbedDialog::setTabEnabled(label, bool)
+CONTENT_LISTENER = 0x15C  # TabbedDialogContentNode listener, set the same way for every card
+TAB_LABEL = b"RR MOD"
+TAB_ICON = b"button_currency.png"  # interface sheet, the store's currency tab icon
+TAB_CARD = b"rr_mod_card.ccb"
 # The SponsorPay offer wall is gone. These three JNI bodies are contiguous
 # (0x369068..0x369170) and their Java call sites are removed by the smali patch.
-MENU_CAVE = 0x369068  # was DKSponsorPayOnChangeStatusCloseFinished (+ CloseAborted)
+ACTION_CAVE = 0x369068  # was DKSponsorPayOnChangeStatusCloseFinished (+ CloseAborted)
 GRANT = 0x369118  # was DKSponsorPayOnChangeStatusError, now (int wallet, int amount)
 GRANT_END = 0x369170
 MENU_CLASS = b"com/pixelberrystudios/hssandroid/OfflineMenu"
+# Dead DKLeanPlumManager::track bodies (their entries are bx lr) hold the rest.
+TAB_CAVE = 0x368104  # inside track(const char*, double, const char*) 0x368100..0x368198
+TAB_CAVE_END = 0x368198
+LOCK_CAVE = 0x368014  # inside track(const char*, const char*) 0x368010..0x368090
+LOCK_CAVE_END = 0x368090
 
 EXPECTED = {
     SHARED_LOGIC_MANAGER: "10b5054c",
@@ -134,12 +157,18 @@ EXPECTED = {
     CURRENCY_EARNED_SOUND: "38b5",
     CREDIT_PURCHASE_SOUND: "25f046fa",
     EMIT_TELEMETRY: "10b5",
-    CURRENCY_ITEM_VISIBLE: "f0b54546",
     POST_PURCHASE_SCENE: "fff78dfd",
     SET_LOCKED: "f8b58623",
     ABOUT_BUTTON: "10b5041c",
-    MENU_CAVE: "30b51820",
-    0x3690C0: "30b51820",  # CloseAborted, overwritten by the end of the menu cave
+    TAB_SPLICE: "a4234946cc50",
+    SHARED_BUILDER: "38b50a4c",
+    NODE_GRAPH: "f0b583b0",
+    ADD_TAB: "30b583b0",
+    SET_TAB_ENABLED: "08b5ba23",
+    ACTION_CAVE: "30b51820",
+    0x3690C0: "30b51820",  # CloseAborted, overwritten by the end of the action cave
+    TAB_CAVE_END: "70b51b4b",  # next track overload, must stay untouched
+    LOCK_CAVE_END: "f0b50f1c",  # next track overload, must stay untouched
     GRANT: "30b51820",
     GRANT_END: "074b10b5",  # DKSponsorPay::~DKSponsorPay, must stay untouched
 }
@@ -221,6 +250,7 @@ class _Asm:
         self.out = bytearray()
         self.labels: dict[str, int] = {}
         self.fixups: list[tuple[str, int, str]] = []
+        self.strings: list[tuple[int, int, bytes]] = []
 
     def here(self) -> int:
         return self.base + len(self.out)
@@ -238,11 +268,33 @@ class _Asm:
         self.fixups.append((kind, self.here(), name))
         self.emit(b"\x00\x00")
 
+    def adr(self, reg: int, text: bytes) -> None:
+        """ldr reg, [pc, #pool]; add reg, pc  -> reg = address of NUL-terminated text."""
+        self.strings.append((reg, self.here(), text))
+        self.emit(b"\x00\x00" + _hw(0x4478 | reg))
+
     def finish(self) -> bytes:
         for kind, src, name in self.fixups:
             dst = self.labels[name]
             code = _b_short(src, dst) if kind == "al" else _b_cond(src, {"eq": EQ, "ne": NE}[kind], dst)
             self.out[src - self.base : src - self.base + 2] = code
+        if self.strings:
+            while len(self.out) & 3:
+                self.out += b"\x00"
+            pool = self.here()
+            text_at = pool + 4 * len(self.strings)
+            words = bytearray()
+            texts = bytearray()
+            for reg, ldr_addr, text in self.strings:
+                slot = pool + len(words)
+                imm = slot - ((ldr_addr + 4) & ~3)
+                if imm < 0 or imm > 0x3FC or imm & 3:
+                    raise RuntimeError(f"literal out of range at {ldr_addr:#x}")
+                self.out[ldr_addr - self.base : ldr_addr - self.base + 2] = _hw(0x4800 | (reg << 8) | (imm >> 2))
+                target = text_at + len(texts)
+                words += struct.pack("<I", (target - (ldr_addr + 2 + 4)) & 0xFFFFFFFF)
+                texts += text + b"\x00"
+            self.out += words + texts
         return bytes(self.out)
 
 
@@ -307,68 +359,89 @@ def grant_dispatcher() -> bytes:
     return blob
 
 
-def menu_cave() -> bytes:
-    """Call OfflineMenu.showFromGame() through JniHelper from the cocos thread.
+def action_cave() -> bytes:
+    """aboutButtonCallback(this, sender) entry.
 
-    push {r4, lr} plus a 16-byte frame keeps sp 8-byte aligned. The HWU cave
-    used a 12-byte frame (sp off by 4); in HSS that faulted inside
-    JNI FindClass on the LG Wing.
+    sender->tag (CCNode +0x7c) 1..8 calls OfflineMenu.action(tag) through
+    JniHelper on the cocos thread. A null sender or tag 0 runs the original
+    callback: its two relocated prologue instructions, then 0x49E438.
+    push {r4, r5, r6, lr} plus a 16-byte frame keeps sp 8-byte aligned; the
+    1.0.0 cave left sp 4 bytes off and faulted inside JNI FindClass.
     """
-    body = bytearray(
-        bytes.fromhex(
-            "10b5"  # push {r4, lr}
-            "84b0"  # sub sp, #16 (12 for JniMethodInfo, 4 for alignment)
-            "6846"  # mov r0, sp
-            "0000"  # ldr r1, [pc, #?]
-            "7944"  # add r1, pc
-            "0000"  # ldr r2, [pc, #?]
-            "7a44"  # add r2, pc
-            "0000"  # ldr r3, [pc, #?]
-            "7b44"  # add r3, pc
-            "00000000"  # bl getStaticMethodInfo
-            "0028"  # cmp r0, #0
-            "00d0"  # beq done
-            "0098"  # ldr r0, [sp, #0]   env
-            "0199"  # ldr r1, [sp, #4]   class
-            "029a"  # ldr r2, [sp, #8]   method
-            "0368"  # ldr r3, [r0]
-            "8e24"  # movs r4, #0x8e
-            "a400"  # lsls r4, r4, #2    CallStaticVoidMethod
-            "1c59"  # ldr r4, [r3, r4]
-            "a047"  # blx r4
-            "04b0"  # done: add sp, #16
-            "10bd"  # pop {r4, pc}
-        )
-    )
-    done = body.find(bytes.fromhex("04b010bd"))
-    beq = body.find(bytes.fromhex("002800d0")) + 2
-    body[beq : beq + 2] = _b_cond(MENU_CAVE + beq, EQ, MENU_CAVE + done)
-    call = body.find(bytes.fromhex("00000000"))
-    body[call : call + 4] = _bl(MENU_CAVE + call, GET_STATIC_METHOD)
-    while len(body) & 3:
-        body += b"\x00"
-    pool = MENU_CAVE + len(body)
-    cls = MENU_CLASS + b"\x00"
-    method = b"showFromGame\x00"
-    sig = b"()V\x00"
-    strings_at = pool + 12
-    targets = [strings_at, strings_at + len(cls), strings_at + len(cls) + len(method)]
-    words = bytearray()
-    cursor = 0
-    for index, target in enumerate(targets):
-        rt = index + 1
-        at = body.find(_hw(0x0000) + _hw(0x4478 | rt), cursor)
-        if at < 0:
-            raise RuntimeError("menu cave literal slot missing")
-        cursor = at + 4
-        ldr_addr = MENU_CAVE + at
-        slot = pool + len(words)
-        imm = slot - ((ldr_addr + 4) & ~3)
-        if imm < 0 or imm > 0x3FC or imm & 3:
-            raise RuntimeError(f"menu cave literal {imm:#x}")
-        body[at : at + 2] = _hw(0x4800 | (rt << 8) | (imm >> 2))
-        words += struct.pack("<I", (target - (ldr_addr + 2 + 4)) & 0xFFFFFFFF)
-    return bytes(body + words + cls + method + sig)
+    a = _Asm(ACTION_CAVE)
+    a.emit(_cmp_imm(1, 0))
+    a.branch("eq", "original")
+    a.emit(_ldr_imm(2, 1, CCNODE_TAG))
+    a.emit(_cmp_imm(2, 0))
+    a.branch("eq", "original")
+    a.emit(_hw(0xB570))  # push {r4, r5, r6, lr}
+    a.emit(_hw(0xB084))  # sub sp, #16 (JniMethodInfo is 12 bytes)
+    a.emit(_mov_low(6, 2))
+    a.emit(_hw(0x4668))  # mov r0, sp
+    a.adr(1, MENU_CLASS)
+    a.adr(2, b"action")
+    a.adr(3, b"(I)V")
+    a.bl(GET_STATIC_METHOD)
+    a.emit(_cmp_imm(0, 0))
+    a.branch("eq", "done")
+    a.emit(_hw(0x9800))  # ldr r0, [sp, #0]   env
+    a.emit(_hw(0x9901))  # ldr r1, [sp, #4]   class
+    a.emit(_hw(0x9A02))  # ldr r2, [sp, #8]   method
+    a.emit(_mov_low(3, 6))  # tag, the one vararg
+    a.emit(_ldr_imm(4, 0, 0))
+    a.emit(_movs_imm(5, 0x8E))
+    a.emit(_hw(0x00AD))  # lsls r5, r5, #2   CallStaticVoidMethod
+    a.emit(_hw(0x5965))  # ldr r5, [r4, r5]
+    a.emit(_hw(0x47A8))  # blx r5
+    a.mark("done")
+    a.emit(_hw(0xB004))  # add sp, #16
+    a.emit(_hw(0xBD70))  # pop {r4, r5, r6, pc}
+    a.mark("original")
+    a.emit(bytes.fromhex("10b5041c"))  # push {r4, lr}; adds r4, r0, #0
+    a.emit(_b_wide(a.here(), ABOUT_RESUME))
+    return a.finish()
+
+
+def tab_cave() -> bytes:
+    """Called with bl from SettingsDialogState::onInit after the ALERTS tab.
+
+    r5 is the TabbedDialog and sb the dialog state, as at the splice. Runs the
+    three instructions the bl replaced, then loads rr_mod_card.ccb and adds it
+    as the RR MOD tab. If the card cannot be loaded nothing is added.
+    """
+    a = _Asm(TAB_CAVE)
+    a.emit(_hw(0xB510))  # push {r4, lr}
+    a.emit(_hw(0xB082))  # sub sp, #8 (stack argument, keeps 8-byte alignment)
+    a.emit(bytes.fromhex("a4234946cc50"))  # movs r3, #0xa4; mov r1, sb; str r4, [r1, r3]
+    a.bl(SHARED_BUILDER)
+    a.adr(1, TAB_CARD)
+    a.emit(_movs_imm(2, 0))
+    a.emit(_movs_imm(3, 1))
+    a.bl(NODE_GRAPH)
+    a.emit(_cmp_imm(0, 0))
+    a.branch("eq", "out")
+    a.emit(_mov_low(4, 0))
+    a.emit(_movs_imm(3, CONTENT_LISTENER >> 1))
+    a.emit(_hw(0x005B))  # lsls r3, r3, #1
+    a.emit(_hw(0x50E5))  # str r5, [r4, r3]
+    a.emit(_movs_imm(3, 0))
+    a.emit(_hw(0x9300))  # str r3, [sp, #0]
+    a.emit(_mov_low(0, 5))
+    a.adr(1, TAB_LABEL)
+    a.adr(2, TAB_ICON)
+    a.emit(_mov_low(3, 4))
+    a.bl(ADD_TAB)
+    a.emit(_mov_low(0, 5))
+    a.adr(1, TAB_LABEL)
+    a.emit(_movs_imm(2, 1))
+    a.bl(SET_TAB_ENABLED)
+    a.mark("out")
+    a.emit(_hw(0xB002))  # add sp, #8
+    a.emit(_hw(0xBD10))  # pop {r4, pc}
+    blob = a.finish()
+    if TAB_CAVE + len(blob) > TAB_CAVE_END:
+        raise RuntimeError(f"tab cave is {len(blob)} bytes, room for {TAB_CAVE_END - TAB_CAVE}")
+    return blob
 
 
 def set_locked_stub(at: int, original: bytes) -> bytes:
@@ -420,7 +493,6 @@ def patch_libhss(path: Path) -> None:
     put(CURRENCY_EARNED_SOUND, BX_LR)
     put(CREDIT_PURCHASE_SOUND, NOP + NOP)
     put(EMIT_TELEMETRY, BX_LR)
-    put(CURRENCY_ITEM_VISIBLE, _return_imm(1))
     for addr in LEANPLUM_TRACK:
         put(addr, BX_LR)
     put(POST_PURCHASE_SCENE, NOP + NOP)
@@ -433,17 +505,22 @@ def patch_libhss(path: Path) -> None:
     for addr in TEST_PURCHASE_REQUIREMENTS:
         put(addr, _movs_imm(0, 0))
 
-    # RR Mod Settings: ABOUT opens the Java panel; the panel calls GRANT.
-    menu = menu_cave()
-    put(MENU_CAVE, menu)
-    lock_at = MENU_CAVE + len(menu)
-    lock_at += lock_at & 1
-    lock = set_locked_stub(lock_at, bytes(data[SET_LOCKED : SET_LOCKED + 4]))
-    if lock_at + len(lock) > GRANT:
-        raise RuntimeError("menu cave and lock stub spill into the grant dispatcher")
-    put(lock_at, lock)
-    put(SET_LOCKED, _b_wide(SET_LOCKED, lock_at))
-    put(ABOUT_BUTTON, _b_wide(ABOUT_BUTTON, MENU_CAVE))
+    # setLocked always clears the lock badge.
+    lock = set_locked_stub(LOCK_CAVE, bytes(data[SET_LOCKED : SET_LOCKED + 4]))
+    if LOCK_CAVE + len(lock) > LOCK_CAVE_END:
+        raise RuntimeError("lock stub spills into the next function")
+    put(LOCK_CAVE, lock)
+    put(SET_LOCKED, _b_wide(SET_LOCKED, LOCK_CAVE))
+
+    # RR MOD tab: onInit adds the card, its buttons reach OfflineMenu.action(tag),
+    # and the Java side credits through GRANT on the cocos thread.
+    put(TAB_CAVE, tab_cave())
+    put(TAB_SPLICE, _bl(TAB_SPLICE, TAB_CAVE) + NOP)
+    action = action_cave()
+    if ACTION_CAVE + len(action) > GRANT:
+        raise RuntimeError("action cave spills into the grant dispatcher")
+    put(ACTION_CAVE, action)
+    put(ABOUT_BUTTON, _b_wide(ABOUT_BUTTON, ACTION_CAVE))
     put(GRANT, grant_dispatcher())
 
     _expect(data, GRANT_END, EXPECTED[GRANT_END])

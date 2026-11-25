@@ -17,7 +17,7 @@ This repository does **not** contain the game. High School Story is copyright Pi
 | Account and network gates | The "create an account" step and the "Network error. Cannot access currency store" cards are skipped. |
 | Store-card locks | "Unlocks with Quest", level-gated classmates, the Decor tab, makeovers and date-locked clothes no longer block a buy. Quests themselves still run on the game's own logic. |
 | Calls after a buy | Sound, telemetry, LeanPlum, sale-date checks and the reward scene, which call into Java after a buy, are skipped. |
-| RR Mod Settings | Settings → **RR MOD** (the old ABOUT row) adds coins, rings, books, pencils, tickets or XP, and exports or imports the save. |
+| RR Mod Settings | The settings dialog has a fourth tab, **RR MOD**, next to HELP, SETTINGS and ALERTS, drawn with the game's own panels and buttons. It adds coins, rings, XP, books, pencils or tickets, and exports or imports the save. |
 
 The server-time check from the Hollywood U patch is not needed. 5.4.0 has no server-time phase at startup and falls back to the phone clock. See [docs/REVERSE.md](docs/REVERSE.md).
 
@@ -43,7 +43,7 @@ Every native patch is matched against the original 5.4.0 bytes first. Another ve
 
 1. A copy signed by Pixelberry cannot be updated in place. Uninstalling it deletes its save.
 2. Install the patched APK. Play Protect will say it has not seen this developer. Choose **Install anyway**.
-3. Open Settings (the gear on the map), the SETTINGS tab, and tap **RR MOD** for currency and save export/import.
+3. Open Settings (the gear on the map) and pick the **RR MOD** tab for currency and save export/import.
 
 The client ships only 32-bit ARM code. Phones without 32-bit support (for example the Galaxy S24 and later) cannot run it.
 

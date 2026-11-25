@@ -7,7 +7,6 @@ The game itself is not in this repository. Pass the path to an APK you already h
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import shutil
@@ -16,13 +15,14 @@ import sys
 from pathlib import Path
 
 from hss_native import patch_libhss
+from rr_card import build as build_rr_card
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
 PATCHER = ROOT / "patcher"
 PACKAGE = "com.pixelberrystudios.hssandroid"
 # Tweak releases stay on 1.0.x. Bump only VERSION_PATCH.
-VERSION_PATCH = 1
+VERSION_PATCH = 3
 VERSION_NAME = f"1.0.{VERSION_PATCH}"
 # 1.0.0 -> 10000. The store build is versionCode 200, so this always sorts after it.
 VERSION_CODE = 10000 + VERSION_PATCH
@@ -31,8 +31,6 @@ EXTRA_SMALI = (
     "ModernCompat.smali",
     "OfflineMenu.smali",
     "OfflineMenu$Open.smali",
-    "OfflineMenu$Row.smali",
-    "OfflineMenu$Run.smali",
 )
 
 METHOD_RE = re.compile(r"^\.method\b.*?^\.end method", re.M | re.S)
@@ -357,13 +355,12 @@ def patch_apktool_yml(path: Path) -> None:
 
 
 def patch_assets(decoded: Path) -> None:
-    strings = decoded / "assets" / "strings.json"
-    table = json.loads(strings.read_text(encoding="utf-8"))
-    if "settings.about" not in table:
-        raise RuntimeError("strings.json has no settings.about")
-    # The ABOUT row of the game's settings card opens RR Mod Settings.
-    table["settings.about"] = "RR MOD"
-    strings.write_text(json.dumps(table, ensure_ascii=False, separators=(", ", ": ")), encoding="utf-8")
+    """Write the RR MOD settings card next to the game's own cards."""
+    assets = decoded / "assets"
+    template = assets / "android_settings_card.ccb"
+    if not template.is_file():
+        raise RuntimeError("assets/android_settings_card.ccb is missing")
+    (assets / "rr_mod_card.ccb").write_bytes(build_rr_card(template.read_bytes()))
 
 
 def patch_native_libs(decoded: Path) -> None:

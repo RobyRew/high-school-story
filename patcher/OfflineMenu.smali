@@ -12,350 +12,102 @@
     return-void
 .end method
 
-# Called from libHSS (Settings > the ABOUT row) on the cocos thread. A Java
-# exception here would stay pending in native code, so nothing escapes.
-.method public static showFromGame()V
-    .locals 2
+# Called from libHSS on the cocos thread when a button on the RR MOD settings
+# tab is tapped; the argument is the button's node tag (assets/rr_mod_card.ccb).
+# 1 coins, 2 rings, 3 XP, 4 books, 5 pencils, 6 tickets: credited right here
+# through the native grant dispatcher, so the HUD counters update at once.
+# 7 export and 8 import open the system file picker on the UI thread.
+# A Java exception here would stay pending in native code, so nothing escapes.
+.method public static action(I)V
+    .locals 4
 
     :try_start_0
     sget-object v0, Lcom/pixelberrystudios/iab/BaseIabActivity;->i:Lcom/pixelberrystudios/iab/BaseIabActivity;
 
-    if-eqz v0, :missing
+    if-eqz v0, :done
+
+    const/4 v1, 0x7
+
+    if-lt p0, v1, :grant
 
     new-instance v1, Lcom/pixelberrystudios/hssandroid/OfflineMenu$Open;
 
-    invoke-direct {v1, v0}, Lcom/pixelberrystudios/hssandroid/OfflineMenu$Open;-><init>(Landroid/app/Activity;)V
+    invoke-direct {v1, v0, p0}, Lcom/pixelberrystudios/hssandroid/OfflineMenu$Open;-><init>(Landroid/app/Activity;I)V
 
     invoke-virtual {v0, v1}, Landroid/app/Activity;->runOnUiThread(Ljava/lang/Runnable;)V
-    :try_end_0
-    .catch Ljava/lang/Throwable; {:try_start_0 .. :try_end_0} :missing
 
-    :missing
-    return-void
-.end method
+    goto :done
 
-.method public static show(Landroid/app/Activity;)V
-    .locals 10
-
-    new-instance v0, Landroid/app/Dialog;
-
-    invoke-direct {v0, p0}, Landroid/app/Dialog;-><init>(Landroid/content/Context;)V
-
+    :grant
     const/4 v1, 0x1
 
-    invoke-virtual {v0, v1}, Landroid/app/Dialog;->requestWindowFeature(I)Z
-
-    new-instance v1, Landroid/widget/LinearLayout;
-
-    invoke-direct {v1, p0}, Landroid/widget/LinearLayout;-><init>(Landroid/content/Context;)V
-
-    const/4 v2, 0x1
-
-    invoke-virtual {v1, v2}, Landroid/widget/LinearLayout;->setOrientation(I)V
-
-    new-instance v2, Landroid/graphics/drawable/GradientDrawable;
-
-    invoke-direct {v2}, Landroid/graphics/drawable/GradientDrawable;-><init>()V
-
-    const/4 v3, 0x0
-
-    invoke-virtual {v2, v3}, Landroid/graphics/drawable/GradientDrawable;->setShape(I)V
-
-    const v3, 0xff7a1f3d
-
-    invoke-virtual {v2, v3}, Landroid/graphics/drawable/GradientDrawable;->setColor(I)V
-
-    const/16 v3, 0x16
-
-    int-to-float v3, v3
-
-    invoke-virtual {v2, v3}, Landroid/graphics/drawable/GradientDrawable;->setCornerRadius(F)V
-
-    const/4 v3, 0x4
-
-    const/4 v4, -0x1
-
-    invoke-virtual {v2, v3, v4}, Landroid/graphics/drawable/GradientDrawable;->setStroke(II)V
-
-    invoke-virtual {v1, v2}, Landroid/widget/LinearLayout;->setBackgroundDrawable(Landroid/graphics/drawable/Drawable;)V
-
-    const/16 v2, 0x1c
-
-    invoke-virtual {v1, v2, v2, v2, v2}, Landroid/widget/LinearLayout;->setPadding(IIII)V
-
-    new-instance v2, Landroid/widget/TextView;
-
-    invoke-direct {v2, p0}, Landroid/widget/TextView;-><init>(Landroid/content/Context;)V
-
-    const-string v3, "RR Mod Settings"
-
-    invoke-virtual {v2, v3}, Landroid/widget/TextView;->setText(Ljava/lang/CharSequence;)V
-
-    const/4 v3, -0x1
-
-    invoke-virtual {v2, v3}, Landroid/widget/TextView;->setTextColor(I)V
-
-    const/high16 v3, 0x41c00000    # 24.0f
-
-    invoke-virtual {v2, v3}, Landroid/widget/TextView;->setTextSize(F)V
-
-    const/16 v3, 0x11
-
-    invoke-virtual {v2, v3}, Landroid/widget/TextView;->setGravity(I)V
-
-    invoke-virtual {v1, v2}, Landroid/widget/LinearLayout;->addView(Landroid/view/View;)V
-
-    new-instance v2, Landroid/widget/TextView;
-
-    invoke-direct {v2, p0}, Landroid/widget/TextView;-><init>(Landroid/content/Context;)V
-
-    const-string v3, "Quests use the game's own rules. Store buys work with no account and no network."
-
-    invoke-virtual {v2, v3}, Landroid/widget/TextView;->setText(Ljava/lang/CharSequence;)V
-
-    const/4 v3, -0x1
-
-    invoke-virtual {v2, v3}, Landroid/widget/TextView;->setTextColor(I)V
-
-    const/high16 v3, 0x41600000    # 14.0f
-
-    invoke-virtual {v2, v3}, Landroid/widget/TextView;->setTextSize(F)V
-
-    const/16 v3, 0x11
-
-    invoke-virtual {v2, v3}, Landroid/widget/TextView;->setGravity(I)V
-
-    const/16 v3, 0x10
-
-    invoke-virtual {v2, v3, v3, v3, v3}, Landroid/widget/TextView;->setPadding(IIII)V
-
-    invoke-virtual {v1, v2}, Landroid/widget/LinearLayout;->addView(Landroid/view/View;)V
-
-    move-object v4, p0
-
-    move-object v5, v1
-
-    move-object v6, v0
-
-    const-string v7, "10,000,000 coins"
-
-    const/4 v8, 0x0
-
-    const v9, 0x989680
-
-    invoke-static/range {v4 .. v9}, Lcom/pixelberrystudios/hssandroid/OfflineMenu;->row(Landroid/app/Activity;Landroid/widget/LinearLayout;Landroid/app/Dialog;Ljava/lang/String;II)V
-
-    const-string v7, "1,000,000 rings"
-
-    const/4 v8, 0x1
-
-    const v9, 0xf4240
-
-    invoke-static/range {v4 .. v9}, Lcom/pixelberrystudios/hssandroid/OfflineMenu;->row(Landroid/app/Activity;Landroid/widget/LinearLayout;Landroid/app/Dialog;Ljava/lang/String;II)V
-
-    const-string v7, "100,000 books"
-
-    const/4 v8, 0x2
-
-    const v9, 0x186a0
-
-    invoke-static/range {v4 .. v9}, Lcom/pixelberrystudios/hssandroid/OfflineMenu;->row(Landroid/app/Activity;Landroid/widget/LinearLayout;Landroid/app/Dialog;Ljava/lang/String;II)V
-
-    const-string v7, "10,000 pencils"
-
-    const/4 v8, 0x3
-
-    const/16 v9, 0x2710
-
-    invoke-static/range {v4 .. v9}, Lcom/pixelberrystudios/hssandroid/OfflineMenu;->row(Landroid/app/Activity;Landroid/widget/LinearLayout;Landroid/app/Dialog;Ljava/lang/String;II)V
-
-    const-string v7, "1,000 tickets"
-
-    const/4 v8, 0x4
-
-    const/16 v9, 0x3e8
-
-    invoke-static/range {v4 .. v9}, Lcom/pixelberrystudios/hssandroid/OfflineMenu;->row(Landroid/app/Activity;Landroid/widget/LinearLayout;Landroid/app/Dialog;Ljava/lang/String;II)V
-
-    const-string v7, "10,000 XP"
-
-    const/4 v8, 0x5
-
-    const/16 v9, 0x2710
-
-    invoke-static/range {v4 .. v9}, Lcom/pixelberrystudios/hssandroid/OfflineMenu;->row(Landroid/app/Activity;Landroid/widget/LinearLayout;Landroid/app/Dialog;Ljava/lang/String;II)V
-
-    const-string v7, "Export progress"
-
-    const/16 v8, 0xa
-
-    const/4 v9, 0x0
-
-    invoke-static/range {v4 .. v9}, Lcom/pixelberrystudios/hssandroid/OfflineMenu;->row(Landroid/app/Activity;Landroid/widget/LinearLayout;Landroid/app/Dialog;Ljava/lang/String;II)V
-
-    const-string v7, "Import progress"
-
-    const/16 v8, 0xb
-
-    invoke-static/range {v4 .. v9}, Lcom/pixelberrystudios/hssandroid/OfflineMenu;->row(Landroid/app/Activity;Landroid/widget/LinearLayout;Landroid/app/Dialog;Ljava/lang/String;II)V
-
-    const-string v7, "Close"
-
-    const/16 v8, 0xc
-
-    invoke-static/range {v4 .. v9}, Lcom/pixelberrystudios/hssandroid/OfflineMenu;->row(Landroid/app/Activity;Landroid/widget/LinearLayout;Landroid/app/Dialog;Ljava/lang/String;II)V
-
-    new-instance v2, Landroid/widget/ScrollView;
-
-    invoke-direct {v2, p0}, Landroid/widget/ScrollView;-><init>(Landroid/content/Context;)V
-
-    invoke-virtual {v2, v1}, Landroid/widget/ScrollView;->addView(Landroid/view/View;)V
-
-    invoke-virtual {v0, v2}, Landroid/app/Dialog;->setContentView(Landroid/view/View;)V
-
-    invoke-virtual {v0}, Landroid/app/Dialog;->getWindow()Landroid/view/Window;
-
-    move-result-object v1
-
-    new-instance v2, Landroid/graphics/drawable/ColorDrawable;
-
-    const/4 v3, 0x0
-
-    invoke-direct {v2, v3}, Landroid/graphics/drawable/ColorDrawable;-><init>(I)V
-
-    invoke-virtual {v1, v2}, Landroid/view/Window;->setBackgroundDrawable(Landroid/graphics/drawable/Drawable;)V
-
-    const/16 v2, 0x348
-
-    const/16 v3, 0x384
-
-    invoke-virtual {v1, v2, v3}, Landroid/view/Window;->setLayout(II)V
-
-    invoke-virtual {v0}, Landroid/app/Dialog;->show()V
-
-    return-void
-.end method
-
-# A white rounded row. Grants show "+label" and keep the panel open.
-.method private static row(Landroid/app/Activity;Landroid/widget/LinearLayout;Landroid/app/Dialog;Ljava/lang/String;II)V
-    .locals 7
-
-    new-instance v0, Landroid/widget/TextView;
-
-    invoke-direct {v0, p0}, Landroid/widget/TextView;-><init>(Landroid/content/Context;)V
-
-    const/16 v1, 0xa
-
-    if-ge p4, v1, :plain
-
-    new-instance v1, Ljava/lang/StringBuilder;
-
-    invoke-direct {v1}, Ljava/lang/StringBuilder;-><init>()V
-
-    const-string v2, "+ "
-
-    invoke-virtual {v1, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
-
-    invoke-virtual {v1, p3}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
-
-    invoke-virtual {v1}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
-
-    move-result-object v1
-
-    invoke-virtual {v0, v1}, Landroid/widget/TextView;->setText(Ljava/lang/CharSequence;)V
-
-    goto :styled
-
-    :plain
-    invoke-virtual {v0, p3}, Landroid/widget/TextView;->setText(Ljava/lang/CharSequence;)V
-
-    :styled
-    const v1, 0xff4a1026
-
-    invoke-virtual {v0, v1}, Landroid/widget/TextView;->setTextColor(I)V
-
-    const/high16 v1, 0x41880000    # 17.0f
-
-    invoke-virtual {v0, v1}, Landroid/widget/TextView;->setTextSize(F)V
-
-    const/16 v1, 0x11
-
-    invoke-virtual {v0, v1}, Landroid/widget/TextView;->setGravity(I)V
-
-    const/4 v1, 0x1
-
-    invoke-virtual {v0, v1}, Landroid/widget/TextView;->setClickable(Z)V
-
-    new-instance v1, Landroid/graphics/drawable/GradientDrawable;
-
-    invoke-direct {v1}, Landroid/graphics/drawable/GradientDrawable;-><init>()V
+    if-ne p0, v1, :not_coins
 
     const/4 v2, 0x0
 
-    invoke-virtual {v1, v2}, Landroid/graphics/drawable/GradientDrawable;->setShape(I)V
+    const v3, 0x989680
 
-    const/4 v2, -0x1
+    goto :credit
 
-    invoke-virtual {v1, v2}, Landroid/graphics/drawable/GradientDrawable;->setColor(I)V
+    :not_coins
+    const/4 v1, 0x2
 
-    const/16 v2, 0x12
+    if-ne p0, v1, :not_rings
 
-    int-to-float v2, v2
+    const/4 v2, 0x1
 
-    invoke-virtual {v1, v2}, Landroid/graphics/drawable/GradientDrawable;->setCornerRadius(F)V
+    const v3, 0xf4240
 
-    invoke-virtual {v0, v1}, Landroid/widget/TextView;->setBackgroundDrawable(Landroid/graphics/drawable/Drawable;)V
+    goto :credit
 
-    const/16 v1, 0x12
+    :not_rings
+    const/4 v1, 0x3
 
-    invoke-virtual {v0, v1, v1, v1, v1}, Landroid/widget/TextView;->setPadding(IIII)V
+    if-ne p0, v1, :not_xp
 
-    new-instance v1, Landroid/widget/LinearLayout$LayoutParams;
+    const/4 v2, 0x5
 
-    const/4 v2, -0x1
+    const/16 v3, 0x2710
 
-    const/4 v3, -0x2
+    goto :credit
 
-    invoke-direct {v1, v2, v3}, Landroid/widget/LinearLayout$LayoutParams;-><init>(II)V
+    :not_xp
+    const/4 v1, 0x4
 
-    const/16 v2, 0xe
+    if-ne p0, v1, :not_books
 
-    iput v2, v1, Landroid/view/ViewGroup$MarginLayoutParams;->topMargin:I
+    const/4 v2, 0x2
 
-    invoke-virtual {v0, v1}, Landroid/widget/TextView;->setLayoutParams(Landroid/view/ViewGroup$LayoutParams;)V
+    const v3, 0x186a0
 
-    new-instance v1, Lcom/pixelberrystudios/hssandroid/OfflineMenu$Row;
+    goto :credit
 
-    move-object v2, p0
+    :not_books
+    const/4 v1, 0x5
 
-    move-object v3, p2
+    if-ne p0, v1, :not_pencils
 
-    move v4, p4
+    const/4 v2, 0x3
 
-    move v5, p5
+    const/16 v3, 0x2710
 
-    move-object v6, p3
+    goto :credit
 
-    invoke-direct/range {v1 .. v6}, Lcom/pixelberrystudios/hssandroid/OfflineMenu$Row;-><init>(Landroid/app/Activity;Landroid/app/Dialog;IILjava/lang/String;)V
+    :not_pencils
+    const/4 v1, 0x6
 
-    invoke-virtual {v0, v1}, Landroid/widget/TextView;->setOnClickListener(Landroid/view/View$OnClickListener;)V
+    if-ne p0, v1, :done
 
-    invoke-virtual {p1, v0}, Landroid/widget/LinearLayout;->addView(Landroid/view/View;)V
+    const/4 v2, 0x4
 
-    return-void
-.end method
+    const/16 v3, 0x3e8
 
-# Wallet 0 coins, 1 rings, 2 books, 3 pencils, 4 tickets, 5 XP. Runs on the
-# cocos thread because PlayerLogic is not thread-safe.
-.method public static grant(II)V
-    .locals 1
+    :credit
+    invoke-static {v2, v3}, Lcom/pixelberrystudios/darthkitty/DKSponsorPay;->DKSponsorPayOnChangeStatusError(II)V
+    :try_end_0
+    .catch Ljava/lang/Throwable; {:try_start_0 .. :try_end_0} :done
 
-    new-instance v0, Lcom/pixelberrystudios/hssandroid/OfflineMenu$Run;
-
-    invoke-direct {v0, p0, p1}, Lcom/pixelberrystudios/hssandroid/OfflineMenu$Run;-><init>(II)V
-
-    invoke-static {v0}, Lcom/pixelberrystudios/iab/BaseIabActivity;->runOnGame(Ljava/lang/Runnable;)V
-
+    :done
     return-void
 .end method
 
