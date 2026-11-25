@@ -52,6 +52,7 @@ Pixelberry's servers for High School Story are gone. The last Android client, 5.
 ### 🛍️ Store that pays out
 - Ring, coin, book and pencil packs, bundles, buildings, outfits and classmates buy locally and grant **what the game's config says**
 - *Unlocks with Quest …* cards, level- and building-gated classmates, the Decor tab, makeovers and date-locked clothes are buyable
+- Hidden and seasonal content is listed too: hidden classmate types, celebrities, quest and event clothes, expired offers and bundles
 - Quests keep the game's own rules — nothing is marked complete for you
 
 </td>
@@ -71,11 +72,12 @@ Pixelberry's servers for High School Story are gone. The last Android client, 5.
 
 | Section | Buttons |
 | --- | --- |
-| **Currency** | `+10M COINS` · `+1M RINGS` · `+10K XP` |
-| **Supplies** | `+100K BOOKS` · `+10K PENCILS` · `+1K TICKETS` |
+| **Currency** | `+10M COINS` · `+100M COINS` · `+1M RINGS` · `+100M RINGS` |
+| **Supplies** | `+100K BOOKS` · `+100M BOOKS` · `+100M PENCILS` · `+100M TICKETS` |
+| **Levels** | `+1 LEVEL` · `+5M XP` · `MAX LEVEL` · `UNLOCK ALL` |
 | **Progress** | `EXPORT` · `IMPORT` |
 
-Every wallet the game has can be topped up: coins, rings (the premium currency), books, pencils, tickets and XP. Tap a button as often as you like.
+Every wallet the game has can be topped up: coins, rings (the premium currency), books, pencils, tickets and XP. **UNLOCK ALL** adds 100,000,000 of every currency and raises you to the max level. Every wallet stops at 2,000,000,000, so no amount of tapping can overflow it.
 
 <div align="center">
 <img src="docs/images/rr-mod-tab.jpg" alt="The RR MOD tab in the game's Settings dialog with Currency, Supplies and Progress sections" width="80%">
@@ -168,6 +170,7 @@ patcher/
 ├── ModernCompat.smali  PendingIntent / registerReceiver / notification shims
 └── OfflineMenu*.smali  RR MOD actions, export/import
 docs/REVERSE.md         every address, what it was and why it changed
+docs/TECHNIQUES.md      how it was decompiled, reversed, patched and how the native tab was injected
 tools/                  apktool, uber-apk-signer
 ```
 

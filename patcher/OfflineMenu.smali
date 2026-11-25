@@ -14,12 +14,16 @@
 
 # Called from libHSS on the cocos thread when a button on the RR MOD settings
 # tab is tapped; the argument is the button's node tag (assets/rr_mod_card.ccb).
-# 1 coins, 2 rings, 3 XP, 4 books, 5 pencils, 6 tickets: credited right here
-# through the native grant dispatcher, so the HUD counters update at once.
-# 7 export and 8 import open the system file picker on the UI thread.
-# A Java exception here would stay pending in native code, so nothing escapes.
+# Tags 1..11 credit one wallet through the native grant dispatcher
+# (DKSponsorPayOnChangeStatusError(wallet, amount)), so the HUD counters move at
+# once. Wallets: 0 coins, 1 rings, 2 books, 3 pencils, 4 tickets, 5 XP,
+# 6 "+1 level", 7 "max level". The native side caps every wallet at
+# 2,000,000,000. Tag 12 (UNLOCK ALL) adds 100,000,000 to wallets 0..4 and then
+# raises the player to the max level. 13 export and 14 import open the system
+# file picker on the UI thread. A Java exception here would stay pending in
+# native code, so nothing escapes; failures are logged under RRMod.
 .method public static action(I)V
-    .locals 4
+    .locals 5
 
     const-string v0, "RRMod"
 
@@ -46,9 +50,9 @@
 
     if-eqz v0, :done
 
-    const/4 v1, 0x7
+    const/16 v1, 0xd
 
-    if-lt p0, v1, :grant
+    if-lt p0, v1, :not_file
 
     new-instance v1, Lcom/pixelberrystudios/hssandroid/OfflineMenu$Open;
 
@@ -58,71 +62,52 @@
 
     goto :done
 
-    :grant
-    const/4 v1, 0x1
+    :not_file
+    const/16 v1, 0xc
 
-    if-ne p0, v1, :not_coins
+    if-ne p0, v1, :single
 
     const/4 v2, 0x0
 
-    const v3, 0x989680
+    const v3, 0x5f5e100
 
-    goto :credit
+    :unlock_loop
+    const/4 v4, 0x5
 
-    :not_coins
-    const/4 v1, 0x2
+    if-ge v2, v4, :unlock_level
 
-    if-ne p0, v1, :not_rings
+    invoke-static {v2, v3}, Lcom/pixelberrystudios/darthkitty/DKSponsorPay;->DKSponsorPayOnChangeStatusError(II)V
 
-    const/4 v2, 0x1
+    add-int/lit8 v2, v2, 0x1
 
-    const v3, 0xf4240
+    goto :unlock_loop
 
-    goto :credit
+    :unlock_level
+    const/4 v2, 0x7
 
-    :not_rings
-    const/4 v1, 0x3
+    const/4 v3, 0x0
 
-    if-ne p0, v1, :not_xp
+    invoke-static {v2, v3}, Lcom/pixelberrystudios/darthkitty/DKSponsorPay;->DKSponsorPayOnChangeStatusError(II)V
 
-    const/4 v2, 0x5
+    goto :done
 
-    const/16 v3, 0x2710
+    :single
+    if-lez p0, :done
 
-    goto :credit
+    const/16 v1, 0xc
 
-    :not_xp
-    const/4 v1, 0x4
+    new-array v2, v1, [I
 
-    if-ne p0, v1, :not_books
+    fill-array-data v2, :wallets
 
-    const/4 v2, 0x2
+    aget v2, v2, p0
 
-    const v3, 0x186a0
+    new-array v3, v1, [I
 
-    goto :credit
+    fill-array-data v3, :amounts
 
-    :not_books
-    const/4 v1, 0x5
+    aget v3, v3, p0
 
-    if-ne p0, v1, :not_pencils
-
-    const/4 v2, 0x3
-
-    const/16 v3, 0x2710
-
-    goto :credit
-
-    :not_pencils
-    const/4 v1, 0x6
-
-    if-ne p0, v1, :done
-
-    const/4 v2, 0x4
-
-    const/16 v3, 0x3e8
-
-    :credit
     invoke-static {v2, v3}, Lcom/pixelberrystudios/darthkitty/DKSponsorPay;->DKSponsorPayOnChangeStatusError(II)V
     :try_end_0
     .catch Ljava/lang/Throwable; {:try_start_0 .. :try_end_0} :failed
@@ -140,6 +125,41 @@
     invoke-static {v1, v2, v0}, Landroid/util/Log;->w(Ljava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;)I
 
     return-void
+
+    # index = tag: 1 +10M coins, 2 +100M coins, 3 +1M rings, 4 +100M rings,
+    # 5 +100K books, 6 +100M books, 7 +100M pencils, 8 +100M tickets,
+    # 9 +1 level, 10 +5M XP, 11 max level
+    :wallets
+    .array-data 4
+        0x0
+        0x0
+        0x0
+        0x1
+        0x1
+        0x2
+        0x2
+        0x3
+        0x4
+        0x6
+        0x5
+        0x7
+    .end array-data
+
+    :amounts
+    .array-data 4
+        0x0
+        0x989680
+        0x5f5e100
+        0xf4240
+        0x5f5e100
+        0x186a0
+        0x5f5e100
+        0x5f5e100
+        0x5f5e100
+        0x0
+        0x4c4b40
+        0x0
+    .end array-data
 .end method
 
 .method public static beginExport(Landroid/app/Activity;)V

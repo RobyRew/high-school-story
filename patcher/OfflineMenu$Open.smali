@@ -27,7 +27,7 @@
 
 
 # virtual methods
-# Runs on the UI thread: the RR MOD tab's EXPORT (7) and IMPORT (8) buttons are
+# Runs on the UI thread: the RR MOD tab's EXPORT (13) and IMPORT (14) buttons are
 # tapped on the cocos thread, which cannot start an activity for a result.
 .method public run()V
     .locals 2
@@ -37,7 +37,7 @@
 
     iget v1, p0, Lcom/pixelberrystudios/hssandroid/OfflineMenu$Open;->b:I
 
-    const/16 p0, 0x7
+    const/16 p0, 0xd
 
     if-ne v1, p0, :import
 

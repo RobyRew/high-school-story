@@ -138,16 +138,18 @@ The settings dialog (`SettingsDialogState::onInit`, `0x3B9A54`) builds its tabs 
 - `assets/rr_mod_card.ccb` is written by `patcher/rr_card.py` from the game's `android_settings_card.ccb`. The `.ccb` files are `darthkitty.Proto.CcbNode` protobufs (field numbers read from the descriptor in `libHSS.so`: 7 member name, 9 position, 11/12 scale, 17 tag, 59 custom class, 62 label, 63–65 sprites, 67 selector, 69 children). The card keeps the settings card's three `LinenDarkest9Slice` panels, `freshman_title_18_font` titles and `button_generic06` buttons. Root class stays `SettingsCard` so selectors resolve on it, and `SettingsCard::init` is not called for it.
 - Every RR button has selector `aboutButtonCallback` and a node tag. `aboutButtonCallback` (`0x49E434`) now starts with `b.w 0x369068`. That cave reads `sender->m_nTag` (`CCNode +0x7C`); 0 (the real ABOUT button) or a null sender runs the two relocated prologue instructions and returns to `0x49E438`. Tags 1..8 call `OfflineMenu.action(int)` via `JniHelper::getStaticMethodInfo` (`0x35E970`) and `CallStaticVoidMethod` (`JNIEnv` `+0x234`, index 141; 1.0.2–1.0.4 used `+0x238`, the `va_list` variant `CallStaticVoidMethodV`, and the tag in `r3` was read as a `va_list` pointer).
 
-| Tag | Button | Java |
+| Tag | Button | Wallet, amount |
 | --- | --- | --- |
-| 1 | +10M COINS | wallet 0, 10,000,000 |
-| 2 | +1M RINGS | wallet 1, 1,000,000 |
-| 3 | +10K XP | wallet 5, 10,000 |
-| 4 | +100K BOOKS | wallet 2, 100,000 |
-| 5 | +10K PENCILS | wallet 3, 10,000 |
-| 6 | +1K TICKETS | wallet 4, 1,000 |
-| 7 | EXPORT | file picker on the UI thread |
-| 8 | IMPORT | file picker on the UI thread |
+| 1 / 2 | +10M COINS / +100M COINS | 0, 10,000,000 / 100,000,000 |
+| 3 / 4 | +1M RINGS / +100M RINGS | 1, 1,000,000 / 100,000,000 |
+| 5 / 6 | +100K BOOKS / +100M BOOKS | 2, 100,000 / 100,000,000 |
+| 7 | +100M PENCILS | 3, 100,000,000 |
+| 8 | +100M TICKETS | 4, 100,000,000 |
+| 9 | +1 LEVEL | 6 (XP to the next level) |
+| 10 | +5M XP | 5, 5,000,000 |
+| 11 | MAX LEVEL | 7 (XP to the last level) |
+| 12 | UNLOCK ALL | 100,000,000 to wallets 0..4, then 7 |
+| 13 / 14 | EXPORT / IMPORT | file picker on the UI thread |
 
 `action` runs on the cocos thread and calls the grant dispatcher directly, so the HUD counters move without a separate dialog. It reads the activity through the public `BaseIabActivity.getInstance()`: the field `BaseIabActivity.i` is package-private, and reading it from `com.pixelberrystudios.hssandroid.OfflineMenu` threw `IllegalAccessError` in 1.0.5 and 1.0.6 (caught and logged under the `RRMod` tag since 1.0.6).
 
@@ -163,18 +165,35 @@ The SponsorPay offer wall is dead. Its three JNI status callbacks are contiguous
 
 The `setLocked` stub lives at `0x368014`, inside another dead `track` body.
 
-The grant dispatcher is the native body of `DKSponsorPayOnChangeStatusError`. JNI resolves natives by short name, so the smali declaration was changed to `(II)V` and the native reads `r2` = wallet and `r3` = amount:
+The JNI native `DKSponsorPayOnChangeStatusError` is now `b.w 0x368020`. JNI resolves natives by short name, so the smali declaration was changed to `(II)V` and the dispatcher reads `r2` = wallet and `r3` = amount:
 
 ```
-wallet 0 creditCoins    0x3E74C4
-       1 creditHearts   0x3E7500   (rings)
-       2 creditStars    0x3E74E0   (books)
-       3 creditPencils  0x3E7520
-       4 creditTickets  0x3E7540
-       * creditXP       0x3E4BF0
+wallet 0 coins    getCoins   0x3E4CAC  creditCoins    0x3E74C4
+       1 rings    getHearts  0x3E4E7C  creditHearts   0x3E7500
+       2 books    getStars   0x3E4D94  creditStars    0x3E74E0
+       3 pencils  getPencils 0x3E4F64  creditPencils  0x3E7520
+       4 tickets  getTickets 0x3E504C  creditTickets  0x3E7540
+       5 XP       getXP      0x3E4B58  creditXP       0x3E4BF0
+       6 +1 level:  getXPForLevel(getPlayerLevel() + 1) - getXP(), nothing if isPlayerMaxLevel()
+       7 max level: getXPForLevel(levelCount + 1) - getXP(), levelCount = Config +0x58
 ```
+
+`getXPForLevel(L)` (`0x3E4B28`) is 0 for L <= 1, else the XP field (`+0x10`) of entry `min(L - 2, count - 1)` of the config level table (`Config +0x54`, count at `+0x58`); `isPlayerMaxLevel(L)` is `L == count + 1`. Every wallet, XP included, is read with its getter first and capped at 2,000,000,000, so no tap can wrap a 32-bit counter. Getters and credit functions are called through tables of `(function | 1) − table` at `0x367FAC` (no relocations needed). The dispatcher is at `0x368020`, the level routine at `0x368094`, both inside dead `DKLeanPlumManager::track` bodies.
 
 It null-checks `sharedManager()` and `getPlayerLogic()` (`+0x4C`). The four Java calls to the old status callbacks in `PBNativeActivity.onActivityResult` (request code 100) are removed, and the patcher stops if any other smali still calls them.
+
+## Hidden, seasonal and celebrity content (1.0.8)
+
+| Change | Address | Effect |
+| --- | --- | --- |
+| `CCSprite::initWithSpriteFrame` → guard at `0x36819C` | `0x5F5E80` | a null frame calls `CCSprite::init()` (empty sprite) instead of crashing; lets hidden items whose icons are not in the APK appear |
+| `StoreLogic::isCurrencyItemVisible` → true | `0x3F5D2C` | expired offers and bundles listed |
+| `CharacterLogic::isBuyableGameMakerVisibleInStore` → true | `0x3CFAF8` | celebrities (Monster High, Lea Michele) listed regardless of dates / quests |
+| `CharacterLogic::canPurchaseBuyableGameMaker` → true | `0x3CFCA8` | and buyable |
+| `ClothingLogic::isClothingQuestUnlocked` → true | `0x3D7D40` | quest and event clothes listed (`isVisibleInStore` = config + product + this) |
+| `getCharacterStoreItemState` `0x3F5B94` → `b 0x3F5BB6`, `0x3F5BBC` → `b 0x3F5BC8` | | every classmate type visible (hidden flag `+0x41` and visibility level `+0x3C` ignored) and buyable (level `+0x2C` / party `+0x40` gates ignored); the "new" badge keeps the game's `hasBeenSeen` logic |
+
+Buildings sold only through a Google Play product (for example `hss_building_monsterhighdorm`) are still listed from `AppStoreManager::getProductIds`, which is the Play inventory and is empty offline.
 
 ## Java / manifest
 
@@ -201,4 +220,5 @@ Phone: LG Wing, Android 10, not rooted.
 - 1.0.3 and 1.0.4 (same code, new file name and signing setup) installed as updates.
 - 1.0.4: the RR MOD tab showed under ALERTS (the tab column scrolls). A button tap reached `getStaticMethodInfo` without the 1.0.0 fault, then aborted in `CallStaticVoidMethodV` (wrong JNI slot, above).
 - 1.0.6: `action` logged `IllegalAccessError` on `BaseIabActivity.i` (above).
+- 1.0.8 installed (not yet exercised): 4×4 RR MOD layout, +100M buttons, +1 LEVEL / MAX LEVEL / UNLOCK ALL, wallet cap, hidden content above.
 - 1.0.7: the six grant buttons logged `action 1`..`action 6`; the HUD then showed 300,000,640 coins, 2,000,016 rings, 100,001 books and level 3. The currency store opened with prices; a store buy is not yet observed (input from another hand overlapped it).

@@ -29,8 +29,25 @@ CREDIT_STARS = 0x3E74E0
 CREDIT_PENCILS = 0x3E7520
 CREDIT_TICKETS = 0x3E7540
 CREDIT_XP = 0x3E4BF0
-# Wallet number the Java menu passes, in this order.
+# Wallet number the Java side passes, in this order. 5 is XP; 6 means "+1 level"
+# and 7 "max level" (both credit XP computed from the level table).
 WALLETS = (CREDIT_COINS, CREDIT_HEARTS, CREDIT_STARS, CREDIT_PENCILS, CREDIT_TICKETS, CREDIT_XP)
+GETTERS = (
+    0x3E4CAC,  # PlayerLogic::getCoins
+    0x3E4E7C,  # PlayerLogic::getHearts
+    0x3E4D94,  # PlayerLogic::getStars
+    0x3E4F64,  # PlayerLogic::getPencils
+    0x3E504C,  # PlayerLogic::getTickets
+    0x3E4B58,  # PlayerLogic::getXP
+)
+# Every wallet, XP included, is capped below 2^31 so repeated taps cannot wrap.
+WALLET_CAP = 2_000_000_000
+GET_SHARED_CONFIG = 0x37CD74  # Config::getSharedConfig(); +0x58 is the player level count
+CONFIG_LEVEL_COUNT = 0x58
+GET_XP_FOR_LEVEL = 0x3E4B28  # PlayerLogic::getXPForLevel(unsigned), 0 for level <= 1
+GET_XP = 0x3E4B58  # PlayerLogic::getXP
+GET_PLAYER_LEVEL = 0x3E4B7C  # PlayerLogic::getPlayerLevel
+IS_PLAYER_MAX_LEVEL = 0x3E4B88  # PlayerLogic::isPlayerMaxLevel(); max level is count + 1
 
 # --- AppStoreManager -----------------------------------------------------------
 ARE_PRODUCTS_AVAILABLE = 0x401448
@@ -86,6 +103,27 @@ RETURN_FALSE = {
     0x3D6E00: "f8b5061c",  # ClothingLogic::isLocked
     0x3D6DB8: "38b5081c",  # ClothingLogic::isLockedByUnlockDateTime
 }
+# Hidden and seasonal store content. Items the store would normally hide can
+# reference icon frames that are not in the APK, so a missing frame must not
+# crash: CCSprite::initWithSpriteFrame(NULL) falls back to CCSprite::init().
+INIT_WITH_SPRITE_FRAME = 0x5F5E80
+CCSPRITE_INIT = 0x5F5294
+SPRITE_GUARD_CAVE = 0x36819C  # inside DKLeanPlumManager::track(const char*, map) 0x368198..0x368214
+SPRITE_GUARD_CAVE_END = 0x368214
+RETURN_TRUE_HIDDEN = {
+    0x3F5D2C: "f0b54546",  # StoreLogic::isCurrencyItemVisible (expired offers, bundles)
+    0x3CFAF8: "f0b55746",  # CharacterLogic::isBuyableGameMakerVisibleInStore (celebrities)
+    0x3CFCA8: "38b50c1c",  # CharacterLogic::canPurchaseBuyableGameMaker
+    0x3D7D40: "f0b54746",  # ClothingLogic::isClothingQuestUnlocked (quest and event clothes)
+}
+# StoreLogic::getCharacterStoreItemState(type, party, level, &visible, &buyable, &isNew)
+# hides a classmate type below its visibility level or with its "hidden" flag,
+# and allows buying only when level-unlocked or party-gated. Both branches now
+# lead to visible = 1, buyable = 1 and the game's own "new" badge logic.
+CHARACTER_STATE_HIDE = 0x3F5B94  # ldr r2, [r0, #0x3c]: visibility-level check
+CHARACTER_STATE_SHOW = 0x3F5BB6  # visible = 1
+CHARACTER_STATE_GATE = 0x3F5BBC  # ldr r3, [r0, #0x48]: level / party gate
+CHARACTER_STATE_BUY = 0x3F5BC8  # buyable = 1, isNew = !hasBeenSeen
 SET_LOCKED = 0x4AD47C  # Store::StoreItem::setLocked(bool)
 # testPurchase return codes 4, 4 and 6 are requirement failures (level, quest,
 # clothing). They become 0 so a real product still credits. 2 (no such
@@ -127,7 +165,13 @@ MENU_CLASS = b"com/pixelberrystudios/hssandroid/OfflineMenu"
 TAB_CAVE = 0x368104  # inside track(const char*, double, const char*) 0x368100..0x368198
 TAB_CAVE_END = 0x368198
 LOCK_CAVE = 0x368014  # inside track(const char*, const char*) 0x368010..0x368090
-LOCK_CAVE_END = 0x368090
+LOCK_CAVE_END = 0x368020
+GRANT_CAVE = 0x368020  # rest of that body: the grant dispatcher proper
+GRANT_CAVE_END = 0x368090
+LEVEL_CAVE = 0x368094  # inside track(const char*, double) 0x368090..0x368100
+LEVEL_CAVE_END = 0x368100
+TABLE_CAVE = 0x367FAC  # inside track(const char*) 0x367FA8..0x368010: offset tables
+TABLE_CAVE_END = 0x368010
 
 EXPECTED = {
     SHARED_LOGIC_MANAGER: "10b5054c",
@@ -168,7 +212,20 @@ EXPECTED = {
     ACTION_CAVE: "30b51820",
     0x3690C0: "30b51820",  # CloseAborted, overwritten by the end of the action cave
     TAB_CAVE_END: "70b51b4b",  # next track overload, must stay untouched
-    LOCK_CAVE_END: "f0b50f1c",  # next track overload, must stay untouched
+    INIT_WITH_SPRITE_FRAME: "70b50a1c",
+    CCSPRITE_INIT: "f0b54746",
+    SPRITE_GUARD_CAVE_END: "f0b54746",  # next track overload, must stay untouched
+    CHARACTER_STATE_HIDE: "c26b9542",
+    CHARACTER_STATE_GATE: "836cdb06",
+    GRANT_CAVE_END: "f0b50f1c",  # next track overload, must stay untouched
+    TABLE_CAVE_END: "f0b51c4b",  # next track overload, must stay untouched
+    LEVEL_CAVE_END: "f0b54f46",  # next track overload, must stay untouched
+    GET_SHARED_CONFIG: "38b5084d",
+    GET_XP_FOR_LEVEL: "10b50129",
+    GET_XP: "08b54068",
+    GET_PLAYER_LEVEL: "08b5fff7",
+    IS_PLAYER_MAX_LEVEL: "10b5041c",
+    **{g: "08b54068" for g in GETTERS[:5]},
     GRANT: "30b51820",
     GRANT_END: "074b10b5",  # DKSponsorPay::~DKSponsorPay, must stay untouched
 }
@@ -240,6 +297,7 @@ def _return_imm(value: int) -> bytes:
 NOP = _hw(0x46C0)  # mov r8, r8
 BX_LR = _hw(0x4770)
 EQ, NE = 0, 1
+CONDITIONS = {"eq": 0, "ne": 1, "hs": 2, "lo": 3, "hi": 8, "ls": 9, "ge": 10, "lt": 11, "gt": 12, "le": 13}
 
 
 class _Asm:
@@ -250,7 +308,7 @@ class _Asm:
         self.out = bytearray()
         self.labels: dict[str, int] = {}
         self.fixups: list[tuple[str, int, str]] = []
-        self.strings: list[tuple[int, int, bytes]] = []
+        self.strings: list[tuple[int, int, object]] = []
 
     def here(self) -> int:
         return self.base + len(self.out)
@@ -268,6 +326,16 @@ class _Asm:
         self.fixups.append((kind, self.here(), name))
         self.emit(b"\x00\x00")
 
+    def addr(self, reg: int, target: int) -> None:
+        """ldr reg, [pc, #pool]; add reg, pc  -> reg = target (any address)."""
+        self.strings.append((reg, self.here(), target))
+        self.emit(b"\x00\x00" + _hw(0x4478 | reg))
+
+    def lit(self, reg: int, value: int) -> None:
+        """ldr reg, [pc, #pool] with a 32-bit constant."""
+        self.strings.append((reg, self.here(), ("value", value)))
+        self.emit(b"\x00\x00")
+
     def adr(self, reg: int, text: bytes) -> None:
         """ldr reg, [pc, #pool]; add reg, pc  -> reg = address of NUL-terminated text."""
         self.strings.append((reg, self.here(), text))
@@ -276,7 +344,7 @@ class _Asm:
     def finish(self) -> bytes:
         for kind, src, name in self.fixups:
             dst = self.labels[name]
-            code = _b_short(src, dst) if kind == "al" else _b_cond(src, {"eq": EQ, "ne": NE}[kind], dst)
+            code = _b_short(src, dst) if kind == "al" else _b_cond(src, CONDITIONS[kind], dst)
             self.out[src - self.base : src - self.base + 2] = code
         if self.strings:
             while len(self.out) & 3:
@@ -291,9 +359,15 @@ class _Asm:
                 if imm < 0 or imm > 0x3FC or imm & 3:
                     raise RuntimeError(f"literal out of range at {ldr_addr:#x}")
                 self.out[ldr_addr - self.base : ldr_addr - self.base + 2] = _hw(0x4800 | (reg << 8) | (imm >> 2))
-                target = text_at + len(texts)
+                if isinstance(text, tuple):
+                    words += struct.pack("<I", text[1] & 0xFFFFFFFF)
+                    continue
+                if isinstance(text, int):
+                    target = text
+                else:
+                    target = text_at + len(texts)
+                    texts += text + b"\x00"
                 words += struct.pack("<I", (target - (ldr_addr + 2 + 4)) & 0xFFFFFFFF)
-                texts += text + b"\x00"
             self.out += words + texts
         return bytes(self.out)
 
@@ -326,13 +400,32 @@ def local_purchase() -> bytes:
     return blob
 
 
-def grant_dispatcher() -> bytes:
-    """JNI (JNIEnv*, jclass, jint wallet, jint amount) -> PlayerLogic::creditX(amount).
+def offset_tables() -> tuple[bytes, int, int]:
+    """Getter and credit tables of (function | 1) - table, so no relocations are needed."""
+    getters = TABLE_CAVE
+    credits = getters + 4 * len(GETTERS)
+    blob = b"".join(struct.pack("<I", ((f | 1) - getters) & 0xFFFFFFFF) for f in GETTERS)
+    blob += b"".join(struct.pack("<I", ((f | 1) - credits) & 0xFFFFFFFF) for f in WALLETS)
+    if TABLE_CAVE + len(blob) > TABLE_CAVE_END:
+        raise RuntimeError("offset tables do not fit")
+    return blob, getters, credits
 
-    Wallet 0 coins, 1 rings, 2 books, 3 pencils, 4 tickets, anything else XP.
+
+def grant_entry() -> bytes:
+    """JNI DKSponsorPayOnChangeStatusError(int wallet, int amount): jump to the dispatcher."""
+    return _b_wide(GRANT, GRANT_CAVE)
+
+
+def grant_dispatcher(getters: int, credits: int) -> bytes:
+    """(JNIEnv*, jclass, jint wallet, jint amount) -> PlayerLogic credit.
+
+    Wallets 0..5 (5 is XP) are capped at WALLET_CAP using the matching getter.
+    6 and 7 credit the XP the level routine returns (nothing at max level),
+    through the same cap. push five registers + 4 bytes keeps sp 8-byte aligned.
     """
-    a = _Asm(GRANT)
-    a.emit(_hw(0xB570))  # push {r4, r5, r6, lr}
+    a = _Asm(GRANT_CAVE)
+    a.emit(_hw(0xB5F0))  # push {r4, r5, r6, r7, lr}
+    a.emit(_hw(0xB081))  # sub sp, #4
     a.emit(_mov_low(4, 2))
     a.emit(_mov_low(5, 3))
     a.bl(SHARED_LOGIC_MANAGER)
@@ -343,19 +436,83 @@ def grant_dispatcher() -> bytes:
     a.emit(_hw(0x4798))  # blx r3
     a.emit(_cmp_imm(0, 0))
     a.branch("eq", "done")
+    a.emit(_mov_low(6, 0))
+    a.emit(_cmp_imm(4, 6))
+    a.branch("lt", "capped")
+    a.bl(LEVEL_CAVE)
+    a.emit(_mov_low(5, 0))
+    a.emit(_cmp_imm(5, 0))
+    a.branch("le", "done")
+    a.emit(_movs_imm(4, 5))
+    a.mark("capped")
+    a.addr(7, getters)
+    a.emit(_hw(0x00A3))  # lsls r3, r4, #2
+    a.emit(_hw(0x58FB))  # ldr r3, [r7, r3]
+    a.emit(_hw(0x19DB))  # adds r3, r3, r7
+    a.emit(_mov_low(0, 6))
+    a.emit(_hw(0x4798))  # blx r3   -> current amount
+    a.lit(1, WALLET_CAP)
+    a.emit(_hw(0x4288))  # cmp r0, r1
+    a.branch("hs", "done")
+    a.emit(_hw(0x1A09))  # subs r1, r1, r0   room left
+    a.emit(_hw(0x428D))  # cmp r5, r1
+    a.branch("ls", "credit")
+    a.emit(_mov_low(5, 1))
+    a.mark("credit")
+    a.addr(7, credits)
+    a.emit(_hw(0x00A3))  # lsls r3, r4, #2
+    a.emit(_hw(0x58FB))  # ldr r3, [r7, r3]
+    a.emit(_hw(0x19DB))  # adds r3, r3, r7
+    a.emit(_mov_low(0, 6))
     a.emit(_mov_low(1, 5))
-    for index, target in enumerate(WALLETS[:-1]):
-        a.emit(_cmp_imm(4, index))
-        a.branch("ne", f"k{index + 1}")
-        a.bl(target)
-        a.branch("al", "done")
-        a.mark(f"k{index + 1}")
-    a.bl(WALLETS[-1])
+    a.emit(_hw(0x4798))  # blx r3
     a.mark("done")
-    a.emit(_hw(0xBD70))  # pop {r4, r5, r6, pc}
+    a.emit(_hw(0xB001))  # add sp, #4
+    a.emit(_hw(0xBDF0))  # pop {r4, r5, r6, r7, pc}
     blob = a.finish()
-    if GRANT + len(blob) > GRANT_END:
-        raise RuntimeError(f"grant dispatcher is {len(blob)} bytes, room for {GRANT_END - GRANT}")
+    if GRANT_CAVE + len(blob) > GRANT_CAVE_END:
+        raise RuntimeError(f"grant dispatcher is {len(blob)} bytes, room for {GRANT_CAVE_END - GRANT_CAVE}")
+    return blob
+
+
+def level_routine() -> bytes:
+    """r4 = 6 (+1 level) or 7 (max level), r6 = PlayerLogic -> r0 = XP still needed.
+
+    +1 level: 0 at max level, else getXPForLevel(level + 1) - getXP().
+    Max level: getXPForLevel(count + 1) - getXP(), count from the level table.
+    """
+    a = _Asm(LEVEL_CAVE)
+    a.emit(_hw(0xB520))  # push {r5, lr}
+    a.emit(_cmp_imm(4, 6))
+    a.branch("ne", "max")
+    a.emit(_mov_low(0, 6))
+    a.bl(IS_PLAYER_MAX_LEVEL)
+    a.emit(_cmp_imm(0, 0))
+    a.branch("ne", "zero")
+    a.emit(_mov_low(0, 6))
+    a.bl(GET_PLAYER_LEVEL)
+    a.emit(_hw(0x1C41))  # adds r1, r0, #1
+    a.branch("al", "target")
+    a.mark("max")
+    a.bl(GET_SHARED_CONFIG)
+    a.emit(_cmp_imm(0, 0))
+    a.branch("eq", "zero")
+    a.emit(_ldr_imm(1, 0, CONFIG_LEVEL_COUNT))
+    a.emit(_hw(0x3101))  # adds r1, #1
+    a.mark("target")
+    a.emit(_mov_low(0, 6))
+    a.bl(GET_XP_FOR_LEVEL)
+    a.emit(_mov_low(5, 0))
+    a.emit(_mov_low(0, 6))
+    a.bl(GET_XP)
+    a.emit(_hw(0x1A28))  # subs r0, r5, r0
+    a.emit(_hw(0xBD20))  # pop {r5, pc}
+    a.mark("zero")
+    a.emit(_movs_imm(0, 0))
+    a.emit(_hw(0xBD20))  # pop {r5, pc}
+    blob = a.finish()
+    if LEVEL_CAVE + len(blob) > LEVEL_CAVE_END:
+        raise RuntimeError(f"level routine is {len(blob)} bytes, room for {LEVEL_CAVE_END - LEVEL_CAVE}")
     return blob
 
 
@@ -447,6 +604,21 @@ def tab_cave() -> bytes:
     return blob
 
 
+def sprite_guard() -> bytes:
+    """CCSprite::initWithSpriteFrame(this, frame): a null frame becomes CCSprite::init()."""
+    a = _Asm(SPRITE_GUARD_CAVE)
+    a.emit(_cmp_imm(1, 0))
+    a.branch("ne", "frame")
+    a.emit(_b_wide(a.here(), CCSPRITE_INIT))  # tail call, lr still points at the caller
+    a.mark("frame")
+    a.emit(bytes.fromhex("70b50a1c"))  # push {r4, r5, r6, lr}; adds r2, r1, #0
+    a.emit(_b_wide(a.here(), INIT_WITH_SPRITE_FRAME + 4))
+    blob = a.finish()
+    if SPRITE_GUARD_CAVE + len(blob) > SPRITE_GUARD_CAVE_END:
+        raise RuntimeError("sprite guard does not fit")
+    return blob
+
+
 def set_locked_stub(at: int, original: bytes) -> bytes:
     """setLocked(bool) with the argument forced to false, then the original body."""
     stub = _movs_imm(1, 0) + original + _b_wide(at + 2 + len(original), SET_LOCKED + 4)
@@ -466,7 +638,14 @@ def _expect(data: bytearray, addr: int, expected: str) -> None:
 
 def patch_libhss(path: Path) -> None:
     data = bytearray(path.read_bytes())
-    checks = {**EXPECTED, **RETURN_TRUE, **RETURN_FALSE, **LEANPLUM_TRACK, **TEST_PURCHASE_REQUIREMENTS}
+    checks = {
+        **EXPECTED,
+        **RETURN_TRUE,
+        **RETURN_FALSE,
+        **RETURN_TRUE_HIDDEN,
+        **LEANPLUM_TRACK,
+        **TEST_PURCHASE_REQUIREMENTS,
+    }
     for addr, expected in checks.items():
         _expect(data, addr, expected)
 
@@ -508,6 +687,14 @@ def patch_libhss(path: Path) -> None:
     for addr in TEST_PURCHASE_REQUIREMENTS:
         put(addr, _movs_imm(0, 0))
 
+    # Hidden, seasonal and celebrity content, with the missing-art guard first.
+    put(SPRITE_GUARD_CAVE, sprite_guard())
+    put(INIT_WITH_SPRITE_FRAME, _b_wide(INIT_WITH_SPRITE_FRAME, SPRITE_GUARD_CAVE))
+    for addr in RETURN_TRUE_HIDDEN:
+        put(addr, _return_imm(1))
+    put(CHARACTER_STATE_HIDE, _b_short(CHARACTER_STATE_HIDE, CHARACTER_STATE_SHOW))
+    put(CHARACTER_STATE_GATE, _b_short(CHARACTER_STATE_GATE, CHARACTER_STATE_BUY))
+
     # setLocked always clears the lock badge.
     lock = set_locked_stub(LOCK_CAVE, bytes(data[SET_LOCKED : SET_LOCKED + 4]))
     if LOCK_CAVE + len(lock) > LOCK_CAVE_END:
@@ -524,7 +711,11 @@ def patch_libhss(path: Path) -> None:
         raise RuntimeError("action cave spills into the grant dispatcher")
     put(ACTION_CAVE, action)
     put(ABOUT_BUTTON, _b_wide(ABOUT_BUTTON, ACTION_CAVE))
-    put(GRANT, grant_dispatcher())
+    tables, getters, credits = offset_tables()
+    put(TABLE_CAVE, tables)
+    put(GRANT_CAVE, grant_dispatcher(getters, credits))
+    put(LEVEL_CAVE, level_routine())
+    put(GRANT, grant_entry())
 
     _expect(data, GRANT_END, EXPECTED[GRANT_END])
     path.write_bytes(data)

@@ -16,6 +16,7 @@ NODE_CLASS = 1
 MEMBER_NAME = 7
 MEMBER_TYPE = 8
 POSITION = 9
+CONTENT_SIZE = 10
 SCALE_X = 11
 SCALE_Y = 12
 TAG = 17
@@ -28,21 +29,25 @@ SELECTOR = 67
 CHILDREN = 69  # CcbNodeList, repeated field 1 = CcbNode
 ROOT = 2  # field of the file message that holds the root node
 
-# (tag, label, column x, row y, scale, sprite). Tags match OfflineMenu.action.
 GREEN = "button_generic06.png"
 BLUE = "button_generic06_blue.png"
-SMALL = 0.75
-BUTTONS = (
-    (1, "+10M COINS", -86, 54, SMALL, GREEN),
-    (2, "+1M RINGS", 27, 54, SMALL, GREEN),
-    (3, "+10K XP", 140, 54, SMALL, GREEN),
-    (4, "+100K BOOKS", -86, -27, SMALL, GREEN),
-    (5, "+10K PENCILS", 27, -27, SMALL, GREEN),
-    (6, "+1K TICKETS", 140, -27, SMALL, GREEN),
-    (7, "EXPORT", -60, -110, 1.0, BLUE),
-    (8, "IMPORT", 115, -110, 1.0, BLUE),
+RED = "button_generic06_red.png"
+# (title, buttons). Each button is (tag, label, sprite); tags match
+# OfflineMenu.action. Four buttons share a row; a two-button row uses wider ones.
+SECTIONS = (
+    ("CURRENCY", ((1, "+10M COINS", GREEN), (2, "+100M COINS", GREEN), (3, "+1M RINGS", GREEN), (4, "+100M RINGS", GREEN))),
+    ("SUPPLIES", ((5, "+100K BOOKS", GREEN), (6, "+100M BOOKS", GREEN), (7, "+100M PENCILS", GREEN), (8, "+100M TICKETS", GREEN))),
+    ("LEVELS", ((9, "+1 LEVEL", GREEN), (10, "+5M XP", GREEN), (11, "MAX LEVEL", GREEN), (12, "UNLOCK ALL", RED))),
+    ("PROGRESS", ((13, "EXPORT", BLUE), (14, "IMPORT", BLUE))),
 )
-TITLES = ("CURRENCY", "SUPPLIES", "PROGRESS")
+# Geometry in the card's own units (the settings card spans x -140..195).
+PANEL_X = -140
+PANEL_WIDTH = 335
+TOP_TITLE_Y = 100
+SECTION_STEP = 66
+PANEL_HEIGHT = 50
+MENU_OFFSET_Y = 4  # the template's CCMenu and label container sit at y = 4
+COLUMNS = {4: ((-98, -14, 70, 154), 0.55, 0.6), 2: ((-56, 112), 0.75, 0.9)}
 
 
 def _varint(data: bytes, i: int) -> tuple[int, int]:
@@ -156,30 +161,37 @@ def build(template: bytes) -> bytes:
     label_template = _drop(_named(_children(labels), "musicOnLabel"), MEMBER_NAME, MEMBER_TYPE)
     if len(panels) != 3 or len(titles) != 3:
         raise RuntimeError("android_settings_card.ccb layout changed")
+    panel_template = panels[0]
+    title_template = _drop(titles[0], MEMBER_NAME, MEMBER_TYPE)
 
-    buttons = []
-    button_labels = []
-    for tag, text, x, y, scale, sprite in BUTTONS:
-        button = _set(button_template, POSITION, 2, _point(x, y))
-        button = _set(button, SCALE_X, 5, _f32(scale))
-        button = _set(button, SCALE_Y, 5, _f32(scale))
-        button = _set(button, TAG, 0, tag)
-        for field in (SPRITE_NORMAL, SPRITE_SELECTED, SPRITE_DISABLED):
-            button = _set(button, field, 2, sprite.encode())
-        button = _set(button, SELECTOR, 2, b"aboutButtonCallback")
-        buttons.append(button)
-        label = _set(label_template, POSITION, 2, _point(x, y + 1))
-        label = _set(label, SCALE_X, 5, _f32(0.85 if scale < 1 else 1.0))
-        label = _set(label, SCALE_Y, 5, _f32(0.85 if scale < 1 else 1.0))
-        label = _set(label, LABEL_STRING, 2, text.encode())
-        button_labels.append(label)
+    new_panels, new_titles, buttons, button_labels = [], [], [], []
+    for index, (title, row) in enumerate(SECTIONS):
+        title_y = TOP_TITLE_Y - SECTION_STEP * index
+        panel = _set(panel_template, POSITION, 2, _point(PANEL_X, title_y - PANEL_HEIGHT))
+        panel = _set(panel, CONTENT_SIZE, 2, encode([(1, 5, _f32(PANEL_WIDTH)), (2, 5, _f32(PANEL_HEIGHT))]))
+        new_panels.append(panel)
+        new_titles.append(
+            _set(_set(title_template, POSITION, 2, _point(27, title_y)), LABEL_STRING, 2, title.encode())
+        )
+        xs, scale, label_scale = COLUMNS[len(row)]
+        y = title_y - PANEL_HEIGHT / 2 - 2 - MENU_OFFSET_Y
+        for (tag, text, sprite), x in zip(row, xs):
+            button = _set(button_template, POSITION, 2, _point(x, y))
+            button = _set(button, SCALE_X, 5, _f32(scale))
+            button = _set(button, SCALE_Y, 5, _f32(scale))
+            button = _set(button, TAG, 0, tag)
+            for field in (SPRITE_NORMAL, SPRITE_SELECTED, SPRITE_DISABLED):
+                button = _set(button, field, 2, sprite.encode())
+            button = _set(button, SELECTOR, 2, b"aboutButtonCallback")
+            buttons.append(button)
+            label = _set(label_template, POSITION, 2, _point(x, y + 1))
+            label = _set(label, SCALE_X, 5, _f32(label_scale))
+            label = _set(label, SCALE_Y, 5, _f32(label_scale))
+            label = _set(label, LABEL_STRING, 2, text.encode())
+            button_labels.append(label)
 
-    new_titles = [
-        _set(_drop(title, MEMBER_NAME, MEMBER_TYPE), LABEL_STRING, 2, text.encode())
-        for title, text in zip(titles, TITLES)
-    ]
     children = (
-        panels
+        new_panels
         + [_with_children(menu, buttons)]
         + new_titles
         + [_with_children(_drop(labels, MEMBER_NAME, MEMBER_TYPE), button_labels)]
