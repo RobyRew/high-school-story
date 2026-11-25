@@ -42,6 +42,19 @@ GETTERS = (
 )
 # Every wallet, XP included, is capped below 2^31 so repeated taps cannot wrap.
 WALLET_CAP = 2_000_000_000
+# Every wallet change in the game (credit, debit, promo rewards, save load)
+# ends in one of these setters. Each entry branches to a stub that clamps the
+# new value at WALLET_CAP, so game income cannot push a wallet past it either.
+SETTERS = {
+    0x3E4CD0: "f8b5061c",  # PlayerLogic::setCoins
+    0x3E4EA0: "f8b5061c",  # PlayerLogic::setHearts
+    0x3E4DB8: "f8b5061c",  # PlayerLogic::setStars
+    0x3E4F88: "f8b5061c",  # PlayerLogic::setPencils
+    0x3E5070: "f8b5061c",  # PlayerLogic::setTickets
+    0x3E4B9C: "f8b5051c",  # PlayerLogic::setXP
+}
+CLAMP_CAVE = 0x368218  # inside track(const char*, double, map) 0x368214..0x3682A0
+CLAMP_CAVE_END = 0x3682A0
 GET_SHARED_CONFIG = 0x37CD74  # Config::getSharedConfig(); +0x58 is the player level count
 CONFIG_LEVEL_COUNT = 0x58
 GET_XP_FOR_LEVEL = 0x3E4B28  # PlayerLogic::getXPForLevel(unsigned), 0 for level <= 1
@@ -86,6 +99,12 @@ LEANPLUM_TRACK = {  # DKLeanPlumManager::track overloads
     0x368214: "f0b5",
 }
 POST_PURCHASE_SCENE = 0x3C22F2  # bl inside MainStoreDialogState::handlePostPurchaseFlow
+# HUD::animateIcon(double, CCNode*) builds a pulse sequence whose step count comes
+# from its double argument. With zero steps CCSequence::actionsWithArray returns
+# NULL and the next store writes through it; a local buy reached that from
+# PlayerLogic::credit -> HUD::onCurrencyEarned. The empty case now returns.
+HUD_ANIMATION_EMPTY = 0x476C86  # beq 0x476D2E (build the sequence)
+HUD_ANIMATION_EXIT = 0x476D5E  # add sp, #0x20 ... pop {r4-r7, pc}
 
 # --- Store-card locks ------------------------------------------------------------
 RETURN_TRUE = {
@@ -202,6 +221,8 @@ EXPECTED = {
     CREDIT_PURCHASE_SOUND: "25f046fa",
     EMIT_TELEMETRY: "10b5",
     POST_PURCHASE_SCENE: "fff78dfd",
+    HUD_ANIMATION_EMPTY: "52d0",
+    HUD_ANIMATION_EXIT: "08b01cbc",
     SET_LOCKED: "f8b58623",
     ABOUT_BUTTON: "10b5041c",
     TAB_SPLICE: "a4234946cc50",
@@ -217,6 +238,7 @@ EXPECTED = {
     SPRITE_GUARD_CAVE_END: "f0b54746",  # next track overload, must stay untouched
     CHARACTER_STATE_HIDE: "c26b9542",
     CHARACTER_STATE_GATE: "836cdb06",
+    CLAMP_CAVE_END: "f8b5041c",  # next function, must stay untouched
     GRANT_CAVE_END: "f0b50f1c",  # next track overload, must stay untouched
     TABLE_CAVE_END: "f0b51c4b",  # next track overload, must stay untouched
     LEVEL_CAVE_END: "f0b54f46",  # next track overload, must stay untouched
@@ -604,6 +626,25 @@ def tab_cave() -> bytes:
     return blob
 
 
+def clamp_stubs() -> tuple[bytes, dict[int, int]]:
+    """One stub per setter: r1 = min(r1, WALLET_CAP), then the setter's own prologue."""
+    a = _Asm(CLAMP_CAVE)
+    entries = {}
+    for setter, original in SETTERS.items():
+        entries[setter] = a.here()
+        a.lit(2, WALLET_CAP)
+        a.emit(_hw(0x4291))  # cmp r1, r2
+        a.branch("ls", f"ok{setter:x}")
+        a.emit(_mov_low(1, 2))
+        a.mark(f"ok{setter:x}")
+        a.emit(bytes.fromhex(original))  # push {r3-r7, lr}; adds rX, r0, #0
+        a.emit(_b_wide(a.here(), setter + 4))
+    blob = a.finish()
+    if CLAMP_CAVE + len(blob) > CLAMP_CAVE_END:
+        raise RuntimeError(f"clamp stubs are {len(blob)} bytes, room for {CLAMP_CAVE_END - CLAMP_CAVE}")
+    return blob, entries
+
+
 def sprite_guard() -> bytes:
     """CCSprite::initWithSpriteFrame(this, frame): a null frame becomes CCSprite::init()."""
     a = _Asm(SPRITE_GUARD_CAVE)
@@ -643,6 +684,7 @@ def patch_libhss(path: Path) -> None:
         **RETURN_TRUE,
         **RETURN_FALSE,
         **RETURN_TRUE_HIDDEN,
+        **SETTERS,
         **LEANPLUM_TRACK,
         **TEST_PURCHASE_REQUIREMENTS,
     }
@@ -678,6 +720,7 @@ def patch_libhss(path: Path) -> None:
     for addr in LEANPLUM_TRACK:
         put(addr, BX_LR)
     put(POST_PURCHASE_SCENE, NOP + NOP)
+    put(HUD_ANIMATION_EMPTY, _b_cond(HUD_ANIMATION_EMPTY, EQ, HUD_ANIMATION_EXIT))
 
     # Store-card locks.
     for addr in RETURN_TRUE:
@@ -716,6 +759,10 @@ def patch_libhss(path: Path) -> None:
     put(GRANT_CAVE, grant_dispatcher(getters, credits))
     put(LEVEL_CAVE, level_routine())
     put(GRANT, grant_entry())
+    clamps, entries = clamp_stubs()
+    put(CLAMP_CAVE, clamps)
+    for setter, stub in entries.items():
+        put(setter, _b_wide(setter, stub))
 
     _expect(data, GRANT_END, EXPECTED[GRANT_END])
     path.write_bytes(data)
