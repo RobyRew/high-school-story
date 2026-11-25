@@ -12,6 +12,10 @@ on:
         description: Publish a GitHub release (off = build artifact only)
         type: boolean
         default: true
+      overwrite:
+        description: Replace the files of a release that already exists for this version
+        type: boolean
+        default: false
   push:
     tags:
       - "1.0.*"
@@ -67,12 +71,17 @@ jobs:
             exit 1
           fi
           ls -la input
+          if [ "$(ls input/*.apk | wc -l)" -ne 1 ]; then
+            echo "::error::The source-apk release must hold exactly one APK."
+            exit 1
+          fi
 
       - name: Restore the signing key
         env:
           KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+          KEY_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
         run: |
-          if [ -z "$KEYSTORE_B64" ]; then
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEY_PASSWORD" ]; then
             echo "::error::Set the SIGNING_KEYSTORE_B64 and SIGNING_PASSWORD repo secrets. Builds are never signed with a throwaway key."
             exit 1
           fi
@@ -83,6 +92,23 @@ jobs:
         env:
           SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
         run: python3 patcher/patch_apk.py --apk input/*.apk
+
+      - name: Check the build is a release build
+        run: |
+          if grep -q 'android:debuggable="true"' build/decoded/AndroidManifest.xml; then
+            echo "::error::The manifest is debuggable. Release builds never pass --debuggable."
+            exit 1
+          fi
+
+      - name: Read the release notes from CHANGELOG.md
+        env:
+          MOD: ${{ steps.v.outputs.mod }}
+        run: |
+          awk -v v="## $MOD" '$0 == v {f=1; next} /^## / {f=0} f' CHANGELOG.md > changelog-section.md
+          if ! grep -q '[^[:space:]]' changelog-section.md; then
+            echo "::error::CHANGELOG.md has no '## $MOD' section."
+            exit 1
+          fi
 
       - name: Stage the release files
         run: |
@@ -107,20 +133,22 @@ jobs:
           APK: ${{ steps.v.outputs.apk }}
           ORIGINAL: ${{ steps.v.outputs.original }}
         run: |
-          cat > notes.md <<NOTES
-          ## High School Story ${GAME} · RR Mod ${TAG}
-
-          | File | What it is |
-          | --- | --- |
-          | \`${APK}\` | the mod: current Android, offline store, unlocked store cards and classmates, RR MOD settings tab |
-          | \`${ORIGINAL}\` | Pixelberry's untouched ${GAME} client |
-          | \`SHA256SUMS.txt\` | checksums of both |
-
-          Install the RR-Mod APK and choose **Install anyway** when Play Protect asks.
-          Every RR-Mod release is signed with the same key, so it installs over the previous one and keeps your save.
-          Pixelberry's own build cannot be updated in place: uninstalling it deletes its save.
-          NOTES
+          {
+            echo "## High School Story ${GAME} · RR Mod ${TAG}"
+            echo
+            cat changelog-section.md
+            echo
+            echo "| File | What it is |"
+            echo "| --- | --- |"
+            echo "| \`${APK}\` | the mod |"
+            echo "| \`${ORIGINAL}\` | Pixelberry's untouched ${GAME} client |"
+            echo "| \`SHA256SUMS.txt\` | checksums of both |"
+          } > notes.md
           if gh release view "$TAG" >/dev/null 2>&1; then
+            if [ "${{ inputs.overwrite }}" != "true" ]; then
+              echo "::error::Release $TAG already exists. Bump VERSION_PATCH, or rerun with overwrite to replace its files."
+              exit 1
+            fi
             gh release upload "$TAG" out/* --clobber
           else
             gh release create "$TAG" out/* --target "${{ github.sha }}" --title "High School Story ${GAME} · RR Mod ${TAG}" --notes-file notes.md

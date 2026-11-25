@@ -21,11 +21,13 @@ ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
 PATCHER = ROOT / "patcher"
 PACKAGE = "com.pixelberrystudios.hssandroid"
-# Tweak releases stay on 1.0.x. Bump only VERSION_PATCH.
-VERSION_PATCH = 10
+# Releases stay on 1.0.x. Bump only VERSION_PATCH, and add a matching
+# "## 1.0.x" section to CHANGELOG.md: the release workflow uses it as the notes.
+VERSION_PATCH = 0
 VERSION_NAME = f"1.0.{VERSION_PATCH}"
-# 1.0.0 -> 10000. The store build is versionCode 200, so this always sorts after it.
-VERSION_CODE = 10000 + VERSION_PATCH
+# Test builds before 1.0.0 used 10000-10010; 10100 + patch keeps every release
+# above them, so it installs as an update and keeps the save.
+VERSION_CODE = 10100 + VERSION_PATCH
 GAME_VERSION = "5.4.0"
 # Release assets: the modded build and the untouched original side by side.
 APK_NAME = f"High-School-Story_{GAME_VERSION}_RR-Mod_{VERSION_NAME}.apk"
@@ -188,25 +190,6 @@ def patch_activity(smali_root: Path) -> None:
         "    :rr_offline_continue\n"
     )
     source = replace_once(source, result_old, result_new, "BaseIabActivity.onActivityResult")
-    if "runOnGame" not in source:
-        source += """
-.method public static runOnGame(Ljava/lang/Runnable;)V
-    .locals 1
-
-    sget-object v0, Lcom/pixelberrystudios/iab/BaseIabActivity;->i:Lcom/pixelberrystudios/iab/BaseIabActivity;
-
-    if-eqz v0, :missing
-
-    iget-object v0, v0, Lcom/pixelberrystudios/iab/BaseIabActivity;->j:Lorg/cocos2dx/lib/Cocos2dxGLSurfaceView;
-
-    if-eqz v0, :missing
-
-    invoke-virtual {v0, p0}, Lorg/cocos2dx/lib/Cocos2dxGLSurfaceView;->queueEvent(Ljava/lang/Runnable;)V
-
-    :missing
-    return-void
-.end method
-"""
     activity.write_text(source, encoding="utf-8")
 
 
@@ -389,7 +372,11 @@ def patch_native_libs(decoded: Path) -> None:
 
 
 def run(command: list[str]) -> None:
-    print("+", " ".join(command))
+    shown = list(command)
+    for flag in ("--ksPass", "--ksKeyPass", "-storepass", "-keypass"):
+        if flag in shown:
+            shown[shown.index(flag) + 1] = "***"
+    print("+", " ".join(shown))
     subprocess.run(command, check=True)
 
 
@@ -418,7 +405,14 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=ROOT / "dist" / APK_NAME)
     parser.add_argument("--java", type=Path, default=None, help="java binary; defaults to JAVA_HOME or PATH")
     parser.add_argument("--work", type=Path, default=ROOT / "build" / "decoded")
+    parser.add_argument(
+        "--debuggable",
+        action="store_true",
+        help="test builds only: mark the app debuggable so adb run-as can read and write its data",
+    )
     args = parser.parse_args()
+    if args.debuggable and args.out == ROOT / "dist" / APK_NAME:
+        args.out = args.out.with_name(APK_NAME.replace(".apk", "_debuggable.apk"))
 
     java = find_java(args.java)
     apktool = TOOLS / "apktool.jar"
@@ -431,6 +425,11 @@ def main() -> int:
         sys.exit(f"{args.apk} is not {PACKAGE}")
     patch_apktool_yml(args.work / "apktool.yml")
     patch_manifest(args.work / "AndroidManifest.xml")
+    if args.debuggable:
+        manifest = args.work / "AndroidManifest.xml"
+        text = manifest.read_text(encoding="utf-8")
+        manifest.write_text(text.replace("<application ", '<application android:debuggable="true" ', 1), encoding="utf-8")
+        print("debuggable test build: not for release")
     patch_styles(args.work)
     patch_smali_tree(args.work)
     patch_assets(args.work)

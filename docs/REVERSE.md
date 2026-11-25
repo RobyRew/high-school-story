@@ -52,13 +52,13 @@ There is nothing to patch in 5.4.0:
 The original `purchase` hands the product to `DKAppStore::purchase` (Google Play). The replacement, 32 bytes, is:
 
 ```
-push {r4, r5, lr}
+push {r4, r5, r6, lr}                  (four registers keep sp 8-byte aligned)
 r4 = this, r5 = id
 bl  LogicManager::sharedManager        0x3DD8E0
 blx [vtable + 0x68]                    getStoreLogic
 bl  StoreLogic::creditPurchase(id)     0x3F5EE8
 bl  AppStoreManager::firePurchaseCompleted(this, id)   0x40284C
-pop {r4, r5, pc}
+pop {r4, r5, r6, pc}
 ```
 
 `creditPurchase` runs `testPurchase` and then pays the config reward (`Config::getCurrencyStoreItemCurrencyReward` → `PlayerLogic::credit`, or the building / character / clothing / makeover credit paths).
@@ -85,19 +85,20 @@ pop {r4, r5, pc}
 
 `ClothingStoreCard::initWithItems` `0x45AA68` `bne` → nop for the clothing tab's matching error.
 
-### Calls after a buy that reach Java
+### Calls after a buy
 
-These were neutralised because on Hollywood U they aborted the process after a buy (JNI `FindClass` faults on current Android). The currency is already credited when they run.
-
-`StoreLogic::isCurrencyItemVisible` (`0x3F5D2C`) is not patched. In HSS it only reads the config and parses sale dates with `DKDateTime` (no JNI). 1.0.1 and 1.0.2 forced it true, which listed hidden currency items whose icon frames are not in the APK, and opening the currency store then crashed in `CCSprite::spriteWithSpriteFrameName` from `StoreItem::configureIconSprite`.
+The first three were neutralised because on Hollywood U they aborted the process after a buy (JNI `FindClass` faults). The currency is already credited when they run.
 
 | Function | Address | Patch |
 | --- | --- | --- |
 | `SoundManager::onCurrencyEarned` | `0x41B720` | `bx lr` |
 | `bl SoundManager::playEffect` inside `creditPurchase` | `0x3F6154` | two nops |
 | `TelemetryManager::emitTelemetryEvent` | `0x42DCC0` | `bx lr` |
-| `DKLeanPlumManager::track` ×6 | `0x367FA8`, `0x368010`, `0x368090`, `0x368100`, `0x368198`, `0x368214` | `bx lr` |
+| `DKLeanPlumManager::track` ×6 | `0x367FA8`, `0x368010`, `0x368090`, `0x368100`, `0x368198`, `0x368214` | `bx lr` (bodies reused as caves) |
 | `bl` to the reward scene in `handlePostPurchaseFlow` | `0x3C22F2` | two nops |
+| `HUD::animateIcon` empty-sequence branch | `0x476C86` | `beq 0x476D2E` → `beq 0x476D5E` (epilogue) |
+
+`HUD::animateIcon(double, CCNode*)` (`0x476BD0`) builds a pulse sequence whose step count comes from its `double` argument. With zero steps `CCSequence::actionsWithArray` returns NULL and `str r1, [r0, #0x1c]` faults. A local buy reached it through `PlayerLogic::credit` → `HUD::onCurrencyEarned` (tombstone in test build 10009); the empty case now returns.
 
 ## Store-card locks
 
@@ -114,7 +115,7 @@ Return true (`movs r0, #1; bx lr`):
 | `CharacterLogic::isMakeoverUnlocked` | `0x3CE3C4` |
 | `CharacterLogic::canPurchaseCharacterType` (classmate cards gated by level, or by owning a building of type 10) | `0x3CE2A4` |
 
-`ClothingLogic::isLocked` (`0x3D6E00`) and `ClothingLogic::isLockedByUnlockDateTime` (`0x3D6DB8`) return false. `Store::StoreItem::setLocked(bool)` (`0x4AD47C`) branches to a 10-byte stub after the menu cave (`0x3690E2`) that sets `r1 = 0`, runs the two original instructions and jumps back to `0x4AD480`, so the lock badge is always cleared.
+`ClothingLogic::isLocked` (`0x3D6E00`) and `ClothingLogic::isLockedByUnlockDateTime` (`0x3D6DB8`) return false. `Store::StoreItem::setLocked(bool)` (`0x4AD47C`) branches to a 10-byte stub at `0x368014` (inside a dead `track` body) that sets `r1 = 0`, runs the two original instructions and jumps back to `0x4AD480`, so the lock badge is always cleared.
 
 `StoreLogic::testPurchase` (`0x3F5A80`) return codes:
 
@@ -122,23 +123,38 @@ Return true (`movs r0, #1; bx lr`):
 | --- | --- | --- |
 | 2 | no config for this product id | no |
 | 3 | one-time item already owned | no |
-| 4 | clothing requirement (two sites `0x3F5B20`, `0x3F5B42`) | → 0 |
+| 4 | clothing: `ClothingLogic::canBuyOneMore` false and a required flag clear (sites `0x3F5B20`, `0x3F5B42`) | → 0 |
 | 5 | no admissions building with an open slot | no |
-| 6 | clothing requirement flag (`0x3F5B52`) | → 0 |
+| 6 | clothing required-flag byte set (`0x3F5B52`) | → 0 |
 
 Quest predicates (`QuestLogic::meetsPassiveCompletionRequirements`, `doesCharacterMeetRequirement`) and the tutorial functions are not patched. Quests and the tutorial run on the game's own logic.
 
-## RR Mod Settings
+## Hidden, seasonal and celebrity content
+
+| Change | Address | Effect |
+| --- | --- | --- |
+| `CCSprite::initWithSpriteFrame` → guard at `0x36819C` | `0x5F5E80` | a null frame calls `CCSprite::init()` (empty sprite) instead of crashing; lets hidden items whose icons are not in the APK appear |
+| `StoreLogic::isCurrencyItemVisible` → true | `0x3F5D2C` | expired offers and bundles listed |
+| `CharacterLogic::isBuyableGameMakerVisibleInStore` → true | `0x3CFAF8` | celebrities (Monster High, Lea Michele) listed regardless of dates / quests |
+| `CharacterLogic::canPurchaseBuyableGameMaker` → true | `0x3CFCA8` | and buyable |
+| `ClothingLogic::isClothingQuestUnlocked` → true | `0x3D7D40` | quest and event clothes listed (`isVisibleInStore` = config + product + this) |
+| `getCharacterStoreItemState` `0x3F5B94` → `b 0x3F5BB6`, `0x3F5BBC` → `b 0x3F5BC8` | | every classmate type visible (hidden flag `+0x41` and visibility level `+0x3C` ignored) and buyable (level `+0x2C` / party `+0x40` gates ignored); the "new" badge keeps the game's `hasBeenSeen` logic |
+
+`isCurrencyItemVisible` only reads the config and parses sale dates with `DKDateTime` (no JNI). Test builds 10001–10002 forced it true without the sprite guard; hidden items whose icon frames are not in the APK then crashed the currency store in `CCSprite::spriteWithSpriteFrameName` from `StoreItem::configureIconSprite`.
+
+Buildings sold only through a Google Play product (for example `hss_building_monsterhighdorm`) are still listed from `AppStoreManager::getProductIds`, which is the Play inventory and is empty offline.
+
+## RR MOD tab
 
 The settings dialog (`SettingsDialogState::onInit`, `0x3B9A54`) builds its tabs with `TabbedDialog::addTab(label, icon, node, false)` (`0x4B6510`) and `setTabEnabled(label, true)` (`0x4B6578`); each card comes from `CCBuilder::nodeGraphWithFile(file, 0, true)` (`0x6109F4`). HELP uses `help_card.ccb` / `button_help.png`, SETTINGS `android_settings_card.ccb`, ALERTS `alerts_settings_card.ccb` / `button_notifications_tab.png`.
 
-1.0.2 adds a fourth tab, **RR MOD**, with the store's `button_currency.png` icon:
+A fourth tab, **RR MOD**, uses the store's `button_currency.png` icon:
 
 - `0x3B9C34` (`movs r3, #0xa4; mov r1, sb; str r4, [r1, r3]`, right after the ALERTS tab) is `bl 0x368104; nop`. The cave at `0x368104` (inside a dead `DKLeanPlumManager::track` body) runs those three instructions, loads `rr_mod_card.ccb`, stores the dialog at card `+0x15C` like the other cards, and adds and enables the tab.
-- `assets/rr_mod_card.ccb` is written by `patcher/rr_card.py` from the game's `android_settings_card.ccb`. The `.ccb` files are `darthkitty.Proto.CcbNode` protobufs (field numbers read from the descriptor in `libHSS.so`: 7 member name, 9 position, 11/12 scale, 17 tag, 59 custom class, 62 label, 63–65 sprites, 67 selector, 69 children). The card keeps the settings card's three `LinenDarkest9Slice` panels, `freshman_title_18_font` titles and `button_generic06` buttons. Root class stays `SettingsCard` so selectors resolve on it, and `SettingsCard::init` is not called for it.
-- Every RR button has selector `aboutButtonCallback` and a node tag. `aboutButtonCallback` (`0x49E434`) now starts with `b.w 0x369068`. That cave reads `sender->m_nTag` (`CCNode +0x7C`); 0 (the real ABOUT button) or a null sender runs the two relocated prologue instructions and returns to `0x49E438`. Tags 1..8 call `OfflineMenu.action(int)` via `JniHelper::getStaticMethodInfo` (`0x35E970`) and `CallStaticVoidMethod` (`JNIEnv` `+0x234`, index 141; 1.0.2–1.0.4 used `+0x238`, the `va_list` variant `CallStaticVoidMethodV`, and the tag in `r3` was read as a `va_list` pointer).
+- `assets/rr_mod_card.ccb` is written by `patcher/rr_card.py` from the game's `android_settings_card.ccb`. The `.ccb` files are `darthkitty.Proto.CcbNode` protobufs (field numbers read from the descriptor in `libHSS.so`: 7 member name, 9 position, 10 content size, 11/12 scale, 17 tag, 59 custom class, 62 label, 63–65 sprites, 67 selector, 69 children). The card reuses the settings card's `LinenDarkest9Slice` panels (four of them), `freshman_title_18_font` titles and `button_generic06` buttons. Root class stays `SettingsCard` so selectors resolve on it, and `SettingsCard::init` is not called for it.
+- Every RR button has selector `aboutButtonCallback` and a node tag. `aboutButtonCallback` (`0x49E434`) starts with `b.w 0x369068`. That cave reads `sender->m_nTag` (`CCNode +0x7C`); 0 (the real ABOUT button) or a null sender runs the two relocated prologue instructions and returns to `0x49E438`. Tags 1..16 call `OfflineMenu.action(int)` via `JniHelper::getStaticMethodInfo` (`0x35E970`) and `CallStaticVoidMethod` (`JNIEnv` `+0x234`, index 141).
 
-| Tag | Button | Wallet, amount |
+| Tag | Button | Grant entry wallet, amount |
 | --- | --- | --- |
 | 1 / 2 | +10M COINS / +100M COINS | 0, 10,000,000 / 100,000,000 |
 | 3 / 4 | +1M RINGS / +100M RINGS | 1, 1,000,000 / 100,000,000 |
@@ -148,12 +164,16 @@ The settings dialog (`SettingsDialogState::onInit`, `0x3B9A54`) builds its tabs 
 | 9 | +1 LEVEL | 6 (XP to the next level) |
 | 10 | +5M XP | 5, 5,000,000 |
 | 11 | MAX LEVEL | 7 (XP to the last level) |
-| 12 | UNLOCK ALL | 100,000,000 to wallets 0..4, then 7 |
+| 12 | UNLOCK ALL | 100,000,000 to wallets 0..4, then 7, 8, 9 |
 | 13 / 14 | EXPORT / IMPORT | file picker on the UI thread |
+| 15 | MAX FRIENDS | 8 |
+| 16 | MAX BUILDINGS | 9 |
 
-`action` runs on the cocos thread and calls the grant dispatcher directly, so the HUD counters move without a separate dialog. It reads the activity through the public `BaseIabActivity.getInstance()`: the field `BaseIabActivity.i` is package-private, and reading it from `com.pixelberrystudios.hssandroid.OfflineMenu` threw `IllegalAccessError` in 1.0.5 and 1.0.6 (caught and logged under the `RRMod` tag since 1.0.6).
+`action` runs on the cocos thread and calls the grant entry directly, so the HUD counters move without a separate dialog. Nothing in Java grants on its own: every amount goes through the native cap. The activity comes from the public `BaseIabActivity.getInstance()`; the field `BaseIabActivity.i` is package-private, and reading it from `com.pixelberrystudios.hssandroid.OfflineMenu` threw `IllegalAccessError` (test builds 10005–10006). Failures are logged under the `RRMod` tag.
 
-The cave frames keep `sp` 8-byte aligned (`push {r4, r5, r6, lr}` + `sub sp, #16`; the tab cave `push {r4, lr}` + `sub sp, #8`). In 1.0.0 the menu cave used the HWU layout (`push {r4, lr}` + `sub sp, #12`, sp off by 4) and tapping it faulted inside ART's `JNI::FindClass` (`FindClass+50` from `getStaticMethodInfo+72`). The local `purchase` stub had the same misalignment (`push {r4, r5, lr}`) and pushes four registers since 1.0.1. On the same phone the HWU 1.0.20 build faulted at the same `FindClass+50` from its `onServerTimeFailure` cave.
+Every cave keeps `sp` 8-byte aligned at its calls. The first test build used the HWU menu-cave layout (`push {r4, lr}` + `sub sp, #12`, sp off by 4) and tapping it faulted inside ART's `JNI::FindClass` (`FindClass+50` from `getStaticMethodInfo+72`). Test builds 10002–10004 called `JNIEnv +0x238` (`CallStaticVoidMethodV`, the `va_list` variant), and ART read the tag in `r3` as a `va_list` pointer.
+
+### Grant entry and dispatcher
 
 The SponsorPay offer wall is dead. Its three JNI status callbacks are contiguous and 0x58 bytes each:
 
@@ -161,11 +181,11 @@ The SponsorPay offer wall is dead. Its three JNI status callbacks are contiguous
 | --- | --- | --- |
 | `…DKSponsorPayOnChangeStatusCloseFinished` | `0x369068` | action cave (runs into the next body) |
 | `…DKSponsorPayOnChangeStatusCloseAborted` | `0x3690C0` | strings of the action cave |
-| `…DKSponsorPayOnChangeStatusError` | `0x369118` | grant dispatcher, ends at `0x369170` (`DKSponsorPay::~DKSponsorPay`) |
+| `…DKSponsorPayOnChangeStatusError` | `0x369118` | grant entry; ends before `0x369170` (`DKSponsorPay::~DKSponsorPay`) |
 
-The `setLocked` stub lives at `0x368014`, inside another dead `track` body.
+JNI resolves natives by short name, so the smali declaration of `DKSponsorPayOnChangeStatusError` was changed to `(II)V`: `r2` = wallet, `r3` = amount. The entry is `cmp r2, #8; bge special; b.w 0x368020; special: b.w 0x42B788`. The four Java calls to the old status callbacks in `PBNativeActivity.onActivityResult` (request code 100) are removed, and the patcher stops if any other smali still calls them.
 
-The JNI native `DKSponsorPayOnChangeStatusError` is now `b.w 0x368020`. JNI resolves natives by short name, so the smali declaration was changed to `(II)V` and the dispatcher reads `r2` = wallet and `r3` = amount:
+The dispatcher (`0x368020`) null-checks `sharedManager()` and `getPlayerLogic()` (`+0x4C`):
 
 ```
 wallet 0 coins    getCoins   0x3E4CAC  creditCoins    0x3E74C4
@@ -178,26 +198,23 @@ wallet 0 coins    getCoins   0x3E4CAC  creditCoins    0x3E74C4
        7 max level: getXPForLevel(levelCount + 1) - getXP(), levelCount = Config +0x58
 ```
 
-`getXPForLevel(L)` (`0x3E4B28`) is 0 for L <= 1, else the XP field (`+0x10`) of entry `min(L - 2, count - 1)` of the config level table (`Config +0x54`, count at `+0x58`); `isPlayerMaxLevel(L)` is `L == count + 1`. Every wallet, XP included, is read with its getter first and capped at 2,000,000,000, so no tap can wrap a 32-bit counter. Getters and credit functions are called through tables of `(function | 1) − table` at `0x367FAC` (no relocations needed). The dispatcher is at `0x368020`, the level routine at `0x368094`, both inside dead `DKLeanPlumManager::track` bodies.
+`getXPForLevel(L)` (`0x3E4B28`) is 0 for L <= 1, else the XP field (`+0x10`) of entry `min(L - 2, count - 1)` of the config level table (`Config +0x54`, count at `+0x58`); `isPlayerMaxLevel(L)` is `L == count + 1`. Each wallet, XP included, is read with its getter first and the amount cut so the wallet stays at or below 2,000,000,000. Getters and credit functions are called through tables of `(function | 1) − table` at `0x367FAC` (no relocations needed). The level routine is at `0x368094`. All of these live in dead `DKLeanPlumManager::track` bodies.
 
-It null-checks `sharedManager()` and `getPlayerLogic()` (`+0x4C`). The four Java calls to the old status callbacks in `PBNativeActivity.onActivityResult` (request code 100) are removed, and the patcher stops if any other smali still calls them.
+### Wallet cap in the setters
 
-## Hidden, seasonal and celebrity content (1.0.8)
+Every wallet change in the game (credit, debit, promo rewards, save load) ends in `PlayerLogic::setCoins` `0x3E4CD0`, `setHearts` `0x3E4EA0`, `setStars` `0x3E4DB8`, `setPencils` `0x3E4F88`, `setTickets` `0x3E5070` or `setXP` `0x3E4B9C`. Each entry branches to a 16-byte stub at `0x368218..0x368290` that clamps `r1` at 2,000,000,000 and runs the setter's own prologue, so the game's income cannot push a wallet past the cap either.
 
-| Change | Address | Effect |
-| --- | --- | --- |
-| `CCSprite::initWithSpriteFrame` → guard at `0x36819C` | `0x5F5E80` | a null frame calls `CCSprite::init()` (empty sprite) instead of crashing; lets hidden items whose icons are not in the APK appear |
-| `StoreLogic::isCurrencyItemVisible` → true | `0x3F5D2C` | expired offers and bundles listed |
-| `CharacterLogic::isBuyableGameMakerVisibleInStore` → true | `0x3CFAF8` | celebrities (Monster High, Lea Michele) listed regardless of dates / quests |
-| `CharacterLogic::canPurchaseBuyableGameMaker` → true | `0x3CFCA8` | and buyable |
-| `ClothingLogic::isClothingQuestUnlocked` → true | `0x3D7D40` | quest and event clothes listed (`isVisibleInStore` = config + product + this) |
-| `getCharacterStoreItemState` `0x3F5B94` → `b 0x3F5BB6`, `0x3F5BBC` → `b 0x3F5BC8` | | every classmate type visible (hidden flag `+0x41` and visibility level `+0x3C` ignored) and buyable (level `+0x2C` / party `+0x40` gates ignored); the "new" badge keeps the game's `hasBeenSeen` logic |
+### MAX FRIENDS and MAX BUILDINGS
 
-Buildings sold only through a Google Play product (for example `hss_building_monsterhighdorm`) are still listed from `AppStoreManager::getProductIds`, which is the Play inventory and is empty offline.
+`TelemetryHelper::emitActionRushed` (`0x42B784`, 0x750 bytes, builds a telemetry event for the disabled `emitTelemetryEvent`) is `bx lr`; its body holds the routine at `0x42B788`:
+
+- **Wallet 8.** `CharacterLogic` (`LogicManager` vtable `+0x28`) keeps its characters in a `std::map<id, Character*>` with the header at `+0x5C` and the leftmost node at `+0x64` (as `CharacterLogic::getCharacter` reads it, `0x3CD5E0`). For each node (id at `+0x10`) it calls `getNumOfSkillLevelsToMax(id)` (`0x3CE5A4`) and, when positive, `addSkillPoints(id, levels)` (`0x3D4C58`), then `_Rb_tree_increment` (`0x7F4384`, not exported; found by its bytes from the HWU library).
+- **Wallet 9.** `BuildingLogic` (vtable `+0x20`) → `+0x24` provider → vtable `+0x14` mutable `GameState`; buildings at `+0x38`, count at `+0x3C`. For each `Building` (type `+0x20`, id `+0x24`) with `getMaxUpgradeLevel(type)` (`0x3C86D0`, -1 when none) above its level (`+0x2C`), it writes the level, sets has-bit 4 at `+0x3C`, builds a `BuildingKey` on the stack (vptr from the `R_ARM_RELATIVE` slot `0x96C6AC` → `_ZTVN3HSS11BuildingKeyE` + 8, type, id) and calls every listener in the `std::list` at `BuildingLogic +0x1C` through vtable `+4` (`onBuildingUpgradePurchased(key, level)`), exactly as `BuildingLogic::purchaseUpgrade` (`0x3CBAE8`) does after a paid upgrade.
 
 ## Java / manifest
 
-- `targetSdkVersion` 35, `versionName` `1.0.x`, `versionCode` `10000 + x`.
+- `targetSdkVersion` 35, `versionName` `1.0.x`, `versionCode` `10100 + x` (test builds before 1.0.0 used 10000–10010).
+- `android:debuggable` only with `patch_apk.py --debuggable` (file name ends in `_debuggable`); the release workflow fails if the manifest is debuggable.
 - `android:exported="true"` on `com.leanplum.GcmBroadcastReceiver` and `AppMeasurementReceiver`, the two components in 5.4.0 with an intent-filter and no `exported`.
 - `usesCleartextTraffic`, `requestLegacyExternalStorage`, `preserveLegacyExternalStorage`, `extractNativeLibs`, `org.apache.http.legacy`, `POST_NOTIFICATIONS`, `<queries>`.
 - `PendingIntent` calls get `FLAG_IMMUTABLE` unless they ask for mutable, and two-argument `registerReceiver` calls get `RECEIVER_NOT_EXPORTED` on Android 13+ (`ModernCompat`). Both `smali` and `smali_classes2` are scanned.
@@ -207,18 +224,19 @@ Buildings sold only through a Google Play product (for example `hss_building_mon
 
 ## Tutorial
 
-HSS has no `tutorialWaitForTap` in `assets/hss.lua` (the HWU acceptance-letter hook). The HSS tutorial is driven by `ScriptManager` tutorial triggers. Whether any first-run step blocks offline is recorded under "Device runs" below.
+HSS has no `tutorialWaitForTap` in `assets/hss.lua` (the HWU acceptance-letter hook). The HSS tutorial is driven by `ScriptManager` tutorial triggers and ran through offline on a fresh game (below).
 
 ## Device runs
 
-Phone: LG Wing, Android 10, not rooted.
+Phone: LG Wing, Android 10, not rooted. Test builds are named by their versionCode.
 
 - Unpatched 5.4.0: reaches the campus offline (level 1, 3500 coins, 499 rings, 15 books, "Admit your Classmate" tutorial step, gear on the HUD).
-- 1.0.0 (fresh install, 2026-11-25): new game started with no network to Pixelberry, character creation, hangouts, admissions and the scripted tutorial ran through to level 2 and the first "More Decor" quest. Settings → SETTINGS → GENERAL shows RR MOD. Tapping it aborted the process (stack alignment, above).
-- 1.0.1 installed over 1.0.0 with the same key; the level-2 save loaded.
-- 1.0.2: opening the currency store from "buy more currency" crashed in `StoreItem::configureIconSprite` (the forced `isCurrencyItemVisible`, above).
-- 1.0.3 and 1.0.4 (same code, new file name and signing setup) installed as updates.
-- 1.0.4: the RR MOD tab showed under ALERTS (the tab column scrolls). A button tap reached `getStaticMethodInfo` without the 1.0.0 fault, then aborted in `CallStaticVoidMethodV` (wrong JNI slot, above).
-- 1.0.6: `action` logged `IllegalAccessError` on `BaseIabActivity.i` (above).
-- 1.0.8 installed (not yet exercised): 4×4 RR MOD layout, +100M buttons, +1 LEVEL / MAX LEVEL / UNLOCK ALL, wallet cap, hidden content above.
-- 1.0.7: the six grant buttons logged `action 1`..`action 6`; the HUD then showed 300,000,640 coins, 2,000,016 rings, 100,001 books and level 3. The currency store opened with prices; a store buy is not yet observed (input from another hand overlapped it).
+- 10000 (fresh install): new game with no Pixelberry servers; character creation, hangouts, admissions and the scripted tutorial ran through to level 2 and the first "More Decor" quest. The first RR MOD entry aborted the process (stack alignment, above).
+- 10001 installed over 10000 with the same key; the save loaded.
+- 10002: the currency store crashed in `StoreItem::configureIconSprite` (forced visibility without the sprite guard, above).
+- 10004: the RR MOD tab showed under ALERTS (the tab column scrolls); a button reached `getStaticMethodInfo` without the alignment fault, then aborted in `CallStaticVoidMethodV` (wrong JNI slot).
+- 10006: `action` logged `IllegalAccessError` on `BaseIabActivity.i`.
+- 10007: the grant buttons logged `action 1`..`action 6` and the HUD moved (300,000,640 coins, 2,000,016 rings, 100,001 books, level 3).
+- 10008: 4×4 tab; +1 LEVEL and UNLOCK ALL ran to level 40; repeated +100M taps stopped at the cap (books exactly 2,000,000,000); the classmates tab listed the hidden types (Hipster, Emo) with "NEW!". Game income could still push coins past the cap.
+- 10009: with the setter clamp, coins, rings and books read exactly 2,000,000,000 after collecting income; a currency buy aborted in `HUD::animateIcon` (empty sequence, above).
+- 10010: the same ring-pack buy completed with no crash.

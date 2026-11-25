@@ -53,6 +53,23 @@ SETTERS = {
     0x3E5070: "f8b5061c",  # PlayerLogic::setTickets
     0x3E4B9C: "f8b5051c",  # PlayerLogic::setXP
 }
+# MAX FRIENDS / MAX BUILDINGS (wallets 8 and 9 of the grant entry).
+VT_GET_BUILDING_LOGIC = 0x20  # LogicManager vtable
+VT_GET_CHARACTER_LOGIC = 0x28
+CHARACTER_MAP_HEADER = 0x5C  # CharacterLogic std::map<id, Character*>; leftmost at +0x64, key at node +0x10
+CHARACTER_MAP_LEFTMOST = 0x64
+SKILL_LEVELS_TO_MAX = 0x3CE5A4  # CharacterLogic::getNumOfSkillLevelsToMax(int id)
+ADD_SKILL_POINTS = 0x3D4C58  # CharacterLogic::addSkillPoints(int id, unsigned levels)
+RB_TREE_INCREMENT = 0x7F4384  # std::_Rb_tree_increment (local, same bytes as in the HWU library)
+MAX_UPGRADE_LEVEL = 0x3C86D0  # BuildingLogic::getMaxUpgradeLevel(type), -1 when it has no upgrades
+BUILDING_KEY_VTABLE_GOT = 0x96C6AC  # R_ARM_RELATIVE slot holding _ZTVN3HSS11BuildingKeyE
+# BuildingLogic: +0x24 game-state provider (vtable +0x14 = mutable GameState),
+# +0x1C listener std::list. GameState +0x38/+0x3C = buildings / count.
+# Building +0x20 type, +0x24 id, +0x2C level, +0x3C has-bits (4 = level set),
+# exactly as BuildingLogic::purchaseUpgrade (0x3CBAE8) writes them.
+EMIT_ACTION_RUSHED = 0x42B784  # TelemetryHelper::emitActionRushed, 0x750 bytes of telemetry only
+SPECIAL_CAVE = 0x42B788  # its body, after the bx lr written at the entry
+SPECIAL_CAVE_END = 0x42BED4
 CLAMP_CAVE = 0x368218  # inside track(const char*, double, map) 0x368214..0x3682A0
 CLAMP_CAVE_END = 0x3682A0
 GET_SHARED_CONFIG = 0x37CD74  # Config::getSharedConfig(); +0x58 is the player level count
@@ -144,9 +161,10 @@ CHARACTER_STATE_SHOW = 0x3F5BB6  # visible = 1
 CHARACTER_STATE_GATE = 0x3F5BBC  # ldr r3, [r0, #0x48]: level / party gate
 CHARACTER_STATE_BUY = 0x3F5BC8  # buyable = 1, isNew = !hasBeenSeen
 SET_LOCKED = 0x4AD47C  # Store::StoreItem::setLocked(bool)
-# testPurchase return codes 4, 4 and 6 are requirement failures (level, quest,
-# clothing). They become 0 so a real product still credits. 2 (no such
-# product), 3 (one-time item already owned) and 5 (admissions full) stay.
+# testPurchase return codes 4, 4 and 6 are clothing requirement failures
+# (ClothingLogic::canBuyOneMore and the item's required-flag byte). They become
+# 0 so a real product still credits. 2 (no such product), 3 (one-time item
+# already owned) and 5 (admissions full) stay.
 TEST_PURCHASE_REQUIREMENTS = {
     0x3F5B20: "0420",
     0x3F5B42: "0420",
@@ -157,7 +175,7 @@ TEST_PURCHASE_REQUIREMENTS = {
 # The settings dialog gets a fourth tab, RR MOD, next to HELP / SETTINGS / ALERTS.
 # Its card is assets/rr_mod_card.ccb (written by patch_apk.py from the game's own
 # android_settings_card.ccb), a SettingsCard whose buttons all call
-# aboutButtonCallback with node tags 1..8. The callback cave passes a non-zero
+# aboutButtonCallback with node tags 1..16. The callback cave passes a non-zero
 # tag to Java OfflineMenu.action(int); tag 0 (the real ABOUT button) runs the
 # original callback.
 ABOUT_BUTTON = 0x49E434  # Settings::SettingsCard::aboutButtonCallback
@@ -237,8 +255,16 @@ EXPECTED = {
     CCSPRITE_INIT: "f0b54746",
     SPRITE_GUARD_CAVE_END: "f0b54746",  # next track overload, must stay untouched
     CHARACTER_STATE_HIDE: "c26b9542",
+    CHARACTER_STATE_SHOW: "069a0123",  # ldr r2, [sp, #0x18]; movs r3, #1
     CHARACTER_STATE_GATE: "836cdb06",
+    CHARACTER_STATE_BUY: "079a0123",  # ldr r2, [sp, #0x1c]; movs r3, #1
     CLAMP_CAVE_END: "f8b5041c",  # next function, must stay untouched
+    EMIT_ACTION_RUSHED: "f0b55646",
+    SPECIAL_CAVE_END: "7047c046",  # TelemetryManager::onLinkError, must stay untouched
+    SKILL_LEVELS_TO_MAX: "10b50c1c",
+    ADD_SKILL_POINTS: "f0b55f46",
+    RB_TREE_INCREMENT: "c26800b5",
+    MAX_UPGRADE_LEVEL: "08b5081c",
     GRANT_CAVE_END: "f0b50f1c",  # next track overload, must stay untouched
     TABLE_CAVE_END: "f0b51c4b",  # next track overload, must stay untouched
     LEVEL_CAVE_END: "f0b54f46",  # next track overload, must stay untouched
@@ -295,10 +321,14 @@ def _b_cond(src: int, cond: int, dst: int) -> bytes:
 
 
 def _movs_imm(reg: int, imm: int) -> bytes:
+    if not (0 <= reg <= 7 and 0 <= imm <= 255):
+        raise ValueError(f"movs r{reg}, #{imm}")
     return _hw(0x2000 | (reg << 8) | imm)
 
 
 def _cmp_imm(reg: int, imm: int) -> bytes:
+    if not (0 <= reg <= 7 and 0 <= imm <= 255):
+        raise ValueError(f"cmp r{reg}, #{imm}")
     return _hw(0x2800 | (reg << 8) | imm)
 
 
@@ -369,6 +399,8 @@ class _Asm:
             code = _b_short(src, dst) if kind == "al" else _b_cond(src, CONDITIONS[kind], dst)
             self.out[src - self.base : src - self.base + 2] = code
         if self.strings:
+            if self.base & 3:
+                raise RuntimeError("caves with literal pools must start 4-aligned")
             while len(self.out) & 3:
                 self.out += b"\x00"
             pool = self.here()
@@ -434,8 +466,128 @@ def offset_tables() -> tuple[bytes, int, int]:
 
 
 def grant_entry() -> bytes:
-    """JNI DKSponsorPayOnChangeStatusError(int wallet, int amount): jump to the dispatcher."""
-    return _b_wide(GRANT, GRANT_CAVE)
+    """JNI DKSponsorPayOnChangeStatusError(int wallet, int amount).
+
+    Wallets 0..7 go to the grant dispatcher, 8 and 9 (max friends, max
+    buildings) to the routine in the emitActionRushed body.
+    """
+    a = _Asm(GRANT)
+    a.emit(_cmp_imm(2, 8))
+    a.branch("ge", "special")
+    a.emit(_b_wide(a.here(), GRANT_CAVE))
+    a.mark("special")
+    a.emit(_b_wide(a.here(), SPECIAL_CAVE))
+    return a.finish()
+
+
+def _str_imm(src: int, base: int, byte_off: int) -> bytes:
+    if byte_off % 4 or not (0 <= byte_off <= 124):
+        raise ValueError(byte_off)
+    return _hw(0x6000 | ((byte_off // 4) << 6) | (base << 3) | src)
+
+
+def special_routine() -> bytes:
+    """Wallet 8: every character to its top skill level. Wallet 9: every
+    building to its top upgrade level, with the upgrade listeners notified."""
+    a = _Asm(SPECIAL_CAVE)
+    a.emit(_hw(0xB5F8))  # push {r3, r4, r5, r6, r7, lr}
+    a.emit(_hw(0xB084))  # sub sp, #16   BuildingKey {vptr, type, id} + level; 40 bytes total
+    a.emit(_cmp_imm(2, 8))
+    a.branch("ne", "buildings")
+    # --- characters
+    a.bl(SHARED_LOGIC_MANAGER)
+    a.emit(_ldr_imm(3, 0, 0))
+    a.emit(_ldr_imm(3, 3, VT_GET_CHARACTER_LOGIC))
+    a.emit(_hw(0x4798))  # blx r3
+    a.emit(_cmp_imm(0, 0))
+    a.branch("eq", "out")
+    a.emit(_mov_low(7, 0))
+    a.emit(_ldr_imm(4, 7, CHARACTER_MAP_LEFTMOST))
+    a.emit(_mov_low(6, 7))
+    a.emit(_hw(0x3600 | CHARACTER_MAP_HEADER))  # adds r6, #0x5c   map end
+    a.mark("cloop")
+    a.emit(_hw(0x42B4))  # cmp r4, r6
+    a.branch("eq", "out")
+    a.emit(_ldr_imm(5, 4, 0x10))  # character id
+    a.emit(_mov_low(0, 7))
+    a.emit(_mov_low(1, 5))
+    a.bl(SKILL_LEVELS_TO_MAX)
+    a.emit(_hw(0x1E02))  # subs r2, r0, #0
+    a.branch("le", "cnext")
+    a.emit(_mov_low(0, 7))
+    a.emit(_mov_low(1, 5))
+    a.bl(ADD_SKILL_POINTS)
+    a.mark("cnext")
+    a.emit(_mov_low(0, 4))
+    a.bl(RB_TREE_INCREMENT)
+    a.emit(_mov_low(4, 0))
+    a.branch("al", "cloop")
+    # --- buildings
+    a.mark("buildings")
+    a.bl(SHARED_LOGIC_MANAGER)
+    a.emit(_ldr_imm(3, 0, 0))
+    a.emit(_ldr_imm(3, 3, VT_GET_BUILDING_LOGIC))
+    a.emit(_hw(0x4798))  # blx r3
+    a.emit(_cmp_imm(0, 0))
+    a.branch("eq", "out")
+    a.emit(_mov_low(7, 0))
+    a.emit(_ldr_imm(0, 7, 0x24))
+    a.emit(_ldr_imm(3, 0, 0))
+    a.emit(_ldr_imm(3, 3, 0x14))
+    a.emit(_hw(0x4798))  # blx r3   mutable GameState
+    a.emit(_mov_low(6, 0))
+    a.emit(_movs_imm(5, 0))
+    a.mark("bloop")
+    a.emit(_ldr_imm(3, 6, 0x3C))
+    a.emit(_hw(0x429D))  # cmp r5, r3
+    a.branch("hs", "out")
+    a.emit(_ldr_imm(3, 6, 0x38))
+    a.emit(_hw(0x00AA))  # lsls r2, r5, #2
+    a.emit(_hw(0x589C))  # ldr r4, [r3, r2]   Building*
+    a.emit(_mov_low(0, 7))
+    a.emit(_ldr_imm(1, 4, 0x20))
+    a.bl(MAX_UPGRADE_LEVEL)
+    a.emit(_ldr_imm(1, 4, 0x2C))
+    a.emit(_hw(0x4288))  # cmp r0, r1
+    a.branch("le", "bnext")
+    a.emit(_str_imm(0, 4, 0x2C))  # level = max
+    a.emit(_hw(0x9003))  # str r0, [sp, #12]
+    a.emit(_ldr_imm(2, 4, 0x3C))
+    a.emit(_movs_imm(3, 4))
+    a.emit(_hw(0x431A))  # orrs r2, r3
+    a.emit(_str_imm(2, 4, 0x3C))
+    a.addr(3, BUILDING_KEY_VTABLE_GOT)
+    a.emit(_ldr_imm(3, 3, 0))
+    a.emit(_hw(0x3308))  # adds r3, #8
+    a.emit(_hw(0x9300))  # str r3, [sp, #0]
+    a.emit(_ldr_imm(3, 4, 0x20))
+    a.emit(_hw(0x9301))  # str r3, [sp, #4]
+    a.emit(_ldr_imm(3, 4, 0x24))
+    a.emit(_hw(0x9302))  # str r3, [sp, #8]
+    a.emit(_ldr_imm(4, 7, 0x1C))  # first listener node
+    a.mark("notify")
+    a.emit(_mov_low(3, 7))
+    a.emit(_hw(0x331C))  # adds r3, #0x1c   list head
+    a.emit(_hw(0x429C))  # cmp r4, r3
+    a.branch("eq", "bnext")
+    a.emit(_ldr_imm(0, 4, 8))
+    a.emit(_hw(0x4669))  # mov r1, sp   BuildingKey
+    a.emit(_hw(0x9A03))  # ldr r2, [sp, #12]   level
+    a.emit(_ldr_imm(3, 0, 0))
+    a.emit(_ldr_imm(3, 3, 4))
+    a.emit(_hw(0x4798))  # blx r3   onBuildingUpgradePurchased(key, level)
+    a.emit(_ldr_imm(4, 4, 0))
+    a.branch("al", "notify")
+    a.mark("bnext")
+    a.emit(_hw(0x3501))  # adds r5, #1
+    a.branch("al", "bloop")
+    a.mark("out")
+    a.emit(_hw(0xB004))  # add sp, #16
+    a.emit(_hw(0xBDF8))  # pop {r3, r4, r5, r6, r7, pc}
+    blob = a.finish()
+    if SPECIAL_CAVE + len(blob) > SPECIAL_CAVE_END:
+        raise RuntimeError("special routine does not fit")
+    return blob
 
 
 def grant_dispatcher(getters: int, credits: int) -> bytes:
@@ -541,11 +693,11 @@ def level_routine() -> bytes:
 def action_cave() -> bytes:
     """aboutButtonCallback(this, sender) entry.
 
-    sender->tag (CCNode +0x7c) 1..8 calls OfflineMenu.action(tag) through
+    sender->tag (CCNode +0x7c) 1..16 calls OfflineMenu.action(tag) through
     JniHelper on the cocos thread. A null sender or tag 0 runs the original
     callback: its two relocated prologue instructions, then 0x49E438.
     push {r4, r5, r6, lr} plus a 16-byte frame keeps sp 8-byte aligned; the
-    1.0.0 cave left sp 4 bytes off and faulted inside JNI FindClass.
+    first test build left sp 4 bytes off and faulted inside JNI FindClass.
     """
     a = _Asm(ACTION_CAVE)
     a.emit(_cmp_imm(1, 0))
@@ -569,7 +721,7 @@ def action_cave() -> bytes:
     a.emit(_mov_low(3, 6))  # tag, the one vararg
     a.emit(_ldr_imm(4, 0, 0))
     # JNINativeInterface index 141 (+0x234) is CallStaticVoidMethod(env, cls, mid, ...).
-    # 142 (+0x238) is the va_list variant; 1.0.2-1.0.4 called that one, and ART
+    # 142 (+0x238) is the va_list variant; earlier test builds called that one, and ART
     # read the tag in r3 as a va_list pointer and faulted.
     a.emit(_movs_imm(5, 0x8D))
     a.emit(_hw(0x00AD))  # lsls r5, r5, #2   CallStaticVoidMethod
@@ -759,6 +911,8 @@ def patch_libhss(path: Path) -> None:
     put(GRANT_CAVE, grant_dispatcher(getters, credits))
     put(LEVEL_CAVE, level_routine())
     put(GRANT, grant_entry())
+    put(EMIT_ACTION_RUSHED, BX_LR)
+    put(SPECIAL_CAVE, special_routine())
     clamps, entries = clamp_stubs()
     put(CLAMP_CAVE, clamps)
     for setter, stub in entries.items():

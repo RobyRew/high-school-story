@@ -33,12 +33,12 @@ GREEN = "button_generic06.png"
 BLUE = "button_generic06_blue.png"
 RED = "button_generic06_red.png"
 # (title, buttons). Each button is (tag, label, sprite); tags match
-# OfflineMenu.action. Four buttons share a row; a two-button row uses wider ones.
+# OfflineMenu.action. Four buttons share each row.
 SECTIONS = (
     ("CURRENCY", ((1, "+10M COINS", GREEN), (2, "+100M COINS", GREEN), (3, "+1M RINGS", GREEN), (4, "+100M RINGS", GREEN))),
     ("SUPPLIES", ((5, "+100K BOOKS", GREEN), (6, "+100M BOOKS", GREEN), (7, "+100M PENCILS", GREEN), (8, "+100M TICKETS", GREEN))),
     ("LEVELS", ((9, "+1 LEVEL", GREEN), (10, "+5M XP", GREEN), (11, "MAX LEVEL", GREEN), (12, "UNLOCK ALL", RED))),
-    ("PROGRESS", ((13, "EXPORT", BLUE), (14, "IMPORT", BLUE))),
+    ("PROGRESS", ((15, "MAX FRIENDS", GREEN), (16, "MAX BUILDINGS", GREEN), (13, "EXPORT", BLUE), (14, "IMPORT", BLUE))),
 )
 # Geometry in the card's own units (the settings card spans x -140..195).
 PANEL_X = -140
@@ -47,7 +47,7 @@ TOP_TITLE_Y = 100
 SECTION_STEP = 66
 PANEL_HEIGHT = 50
 MENU_OFFSET_Y = 4  # the template's CCMenu and label container sit at y = 4
-COLUMNS = {4: ((-98, -14, 70, 154), 0.55, 0.6), 2: ((-56, 112), 0.75, 0.9)}
+COLUMNS = {4: ((-98, -14, 70, 154), 0.55, 0.6)}
 
 
 def _varint(data: bytes, i: int) -> tuple[int, int]:

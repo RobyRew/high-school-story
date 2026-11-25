@@ -75,9 +75,9 @@ Pixelberry's servers for High School Story are gone. The last Android client, 5.
 | **Currency** | `+10M COINS` · `+100M COINS` · `+1M RINGS` · `+100M RINGS` |
 | **Supplies** | `+100K BOOKS` · `+100M BOOKS` · `+100M PENCILS` · `+100M TICKETS` |
 | **Levels** | `+1 LEVEL` · `+5M XP` · `MAX LEVEL` · `UNLOCK ALL` |
-| **Progress** | `EXPORT` · `IMPORT` |
+| **Progress** | `MAX FRIENDS` · `MAX BUILDINGS` · `EXPORT` · `IMPORT` |
 
-Every wallet the game has can be topped up: coins, rings (the premium currency), books, pencils, tickets and XP. **UNLOCK ALL** adds 100,000,000 of every currency and raises you to the max level. Every wallet stops at 2,000,000,000, so no amount of tapping can overflow it.
+Every wallet the game has can be topped up: coins, rings (the premium currency), books, pencils, tickets and XP. **+1 LEVEL** adds exactly the XP to the next level and **MAX LEVEL** the XP to the last one. **MAX FRIENDS** raises every classmate to the top skill level and **MAX BUILDINGS** every building to its top upgrade. **UNLOCK ALL** adds 100,000,000 of every currency, then runs MAX LEVEL, MAX FRIENDS and MAX BUILDINGS. Every wallet stops at 2,000,000,000 — for the buttons and for the game's own income — so it can never overflow.
 
 <div align="center">
 <img src="docs/images/rr-mod-tab.jpg" alt="The RR MOD tab in the game's Settings dialog with Currency, Supplies and Progress sections" width="80%">
@@ -139,6 +139,7 @@ The result is `dist/High-School-Story_5.4.0_RR-Mod_1.0.x.apk`. Releases stay on 
 | `--out` | `dist/High-School-Story_5.4.0_RR-Mod_1.0.x.apk` |
 | `--java` | `JAVA_HOME/bin/java`, Homebrew `openjdk@21`, then `java` on `PATH` |
 | `--work` | `build/decoded` |
+| `--debuggable` | off. Test builds only: marks the app debuggable (for `adb run-as`) and names the file `…_debuggable.apk`. Releases never use it. |
 
 Every native patch checks the original bytes first, so any version other than 5.4.0 stops with an error instead of writing a broken library.
 
@@ -149,7 +150,7 @@ Every native patch checks the original bytes first, so any version other than 5.
 | **Check patcher** | every push and PR | compiles the Python |
 | **Build and release** | manual run, or a pushed `1.0.x` tag | downloads the original from the `source-apk` release, patches it, signs it with the permanent key, and publishes release `1.0.x` with the RR-Mod APK, the original APK and `SHA256SUMS.txt` |
 
-To ship a new version: bump `VERSION_PATCH`, push, then run **Build and release** (or push the matching tag, e.g. `git tag 1.0.4 && git push origin 1.0.4`).
+To ship a new version: bump `VERSION_PATCH`, push, then run **Build and release** (or push the matching tag, e.g. `git tag 1.0.1 && git push origin 1.0.1`). Add a `## 1.0.x` section to [CHANGELOG.md](CHANGELOG.md) first: the workflow uses it as the release notes and stops without it. An existing release is only replaced when the manual run is started with **overwrite**.
 
 The workflow needs the original APK attached to a release tagged `source-apk`, and two repo secrets, set once:
 
@@ -171,6 +172,7 @@ patcher/
 └── OfflineMenu*.smali  RR MOD actions, export/import
 docs/REVERSE.md         every address, what it was and why it changed
 docs/TECHNIQUES.md      how it was decompiled, reversed, patched and how the native tab was injected
+CHANGELOG.md            release notes; each `## 1.0.x` section becomes that release's notes
 tools/                  apktool, uber-apk-signer
 ```
 

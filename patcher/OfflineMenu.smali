@@ -14,34 +14,17 @@
 
 # Called from libHSS on the cocos thread when a button on the RR MOD settings
 # tab is tapped; the argument is the button's node tag (assets/rr_mod_card.ccb).
-# Tags 1..11 credit one wallet through the native grant dispatcher
+# Tags 1..11, 15 and 16 go to the native grant entry
 # (DKSponsorPayOnChangeStatusError(wallet, amount)), so the HUD counters move at
 # once. Wallets: 0 coins, 1 rings, 2 books, 3 pencils, 4 tickets, 5 XP,
-# 6 "+1 level", 7 "max level". The native side caps every wallet at
-# 2,000,000,000. Tag 12 (UNLOCK ALL) adds 100,000,000 to wallets 0..4 and then
-# raises the player to the max level. 13 export and 14 import open the system
-# file picker on the UI thread. A Java exception here would stay pending in
-# native code, so nothing escapes; failures are logged under RRMod.
+# 6 "+1 level", 7 "max level", 8 "max friends", 9 "max buildings". The native
+# side caps every wallet at 2,000,000,000; nothing in Java grants on its own.
+# Tag 12 (UNLOCK ALL) adds 100,000,000 to wallets 0..4, then runs max level,
+# max friends and max buildings. 13 export and 14 import open the system file
+# picker on the UI thread. A Java exception here would stay pending in native
+# code, so nothing escapes; failures are logged under RRMod.
 .method public static action(I)V
     .locals 5
-
-    const-string v0, "RRMod"
-
-    new-instance v1, Ljava/lang/StringBuilder;
-
-    invoke-direct {v1}, Ljava/lang/StringBuilder;-><init>()V
-
-    const-string v2, "action "
-
-    invoke-virtual {v1, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
-
-    invoke-virtual {v1, p0}, Ljava/lang/StringBuilder;->append(I)Ljava/lang/StringBuilder;
-
-    invoke-virtual {v1}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
-
-    move-result-object v1
-
-    invoke-static {v0, v1}, Landroid/util/Log;->i(Ljava/lang/String;Ljava/lang/String;)I
 
     :try_start_0
     invoke-static {}, Lcom/pixelberrystudios/iab/BaseIabActivity;->getInstance()Lcom/pixelberrystudios/iab/BaseIabActivity;
@@ -53,6 +36,10 @@
     const/16 v1, 0xd
 
     if-lt p0, v1, :not_file
+
+    const/16 v1, 0xe
+
+    if-gt p0, v1, :not_file
 
     new-instance v1, Lcom/pixelberrystudios/hssandroid/OfflineMenu$Open;
 
@@ -87,14 +74,23 @@
 
     const/4 v3, 0x0
 
+    :unlock_rest
     invoke-static {v2, v3}, Lcom/pixelberrystudios/darthkitty/DKSponsorPay;->DKSponsorPayOnChangeStatusError(II)V
+
+    add-int/lit8 v2, v2, 0x1
+
+    const/16 v4, 0xa
+
+    if-lt v2, v4, :unlock_rest
 
     goto :done
 
     :single
     if-lez p0, :done
 
-    const/16 v1, 0xc
+    const/16 v1, 0x11
+
+    if-ge p0, v1, :done
 
     new-array v2, v1, [I
 
@@ -128,7 +124,8 @@
 
     # index = tag: 1 +10M coins, 2 +100M coins, 3 +1M rings, 4 +100M rings,
     # 5 +100K books, 6 +100M books, 7 +100M pencils, 8 +100M tickets,
-    # 9 +1 level, 10 +5M XP, 11 max level
+    # 9 +1 level, 10 +5M XP, 11 max level, 12-14 handled above,
+    # 15 max friends, 16 max buildings
     :wallets
     .array-data 4
         0x0
@@ -143,6 +140,11 @@
         0x6
         0x5
         0x7
+        0x0
+        0x0
+        0x0
+        0x8
+        0x9
     .end array-data
 
     :amounts
@@ -158,6 +160,11 @@
         0x5f5e100
         0x0
         0x4c4b40
+        0x0
+        0x0
+        0x0
+        0x0
+        0x0
         0x0
     .end array-data
 .end method
