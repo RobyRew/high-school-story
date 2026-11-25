@@ -109,8 +109,11 @@ Return true (`movs r0, #1; bx lr`):
 | `StoreLogic::isCurrencyClothingUnlocked` | `0x3F4B8C` |
 | `StoreLogic::hasQuestIdUnlocked` ("Unlocks with Quest") | `0x3F4C28` |
 | `ClothingLogic::isClothingUnlocked` | `0x3D6EE4` |
+| `StoreLogic::isDecorationStoreUnlocked` (Decor tab) | `0x3F5BF0` |
+| `CharacterLogic::isMakeoverUnlocked` | `0x3CE3C4` |
+| `CharacterLogic::canPurchaseCharacterType` (classmate cards gated by level, or by owning a building of type 10) | `0x3CE2A4` |
 
-`ClothingLogic::isLocked` (`0x3D6E00`) returns false. `Store::StoreItem::setLocked(bool)` (`0x4AD47C`) branches to a 10-byte stub after the menu cave (`0x3690E2`) that sets `r1 = 0`, runs the two original instructions and jumps back to `0x4AD480`, so the lock badge is always cleared.
+`ClothingLogic::isLocked` (`0x3D6E00`) and `ClothingLogic::isLockedByUnlockDateTime` (`0x3D6DB8`) return false. `Store::StoreItem::setLocked(bool)` (`0x4AD47C`) branches to a 10-byte stub after the menu cave (`0x3690E2`) that sets `r1 = 0`, runs the two original instructions and jumps back to `0x4AD480`, so the lock badge is always cleared.
 
 `StoreLogic::testPurchase` (`0x3F5A80`) return codes:
 
@@ -136,7 +139,9 @@ The SponsorPay offer wall is dead. Its three JNI status callbacks are contiguous
 | `…DKSponsorPayOnChangeStatusCloseAborted` | `0x3690C0` | strings of the menu cave, then the `setLocked` stub |
 | `…DKSponsorPayOnChangeStatusError` | `0x369118` | grant dispatcher, ends at `0x369170` (`DKSponsorPay::~DKSponsorPay`) |
 
-The menu cave is the HWU one with the HSS class name: `JniHelper::getStaticMethodInfo` (`0x35E970`) for `com/pixelberrystudios/hssandroid/OfflineMenu.showFromGame()V`, then `CallStaticVoidMethod` (`JNIEnv` vtable `+0x238`). It runs on the cocos thread, so `showFromGame` posts the dialog to the UI thread and catches every `Throwable` so no exception is left pending in native code.
+The menu cave is the HWU one with the HSS class name and a 16-byte frame instead of 12: `JniHelper::getStaticMethodInfo` (`0x35E970`) for `com/pixelberrystudios/hssandroid/OfflineMenu.showFromGame()V`, then `CallStaticVoidMethod` (`JNIEnv` vtable `+0x238`). `push {r4, lr}` plus 16 bytes keeps `sp` 8-byte aligned. In 1.0.0 the frame was 12 bytes (sp off by 4) and tapping RR MOD faulted inside ART's `JNI::FindClass` (`libart.so` `FindClass+50`, called from `getStaticMethodInfo+72`); crashlytics' signal handler then aborted the process. The local `purchase` stub had the same 4-byte misalignment (`push {r4, r5, lr}`) and pushes four registers since 1.0.1. The HWU library uses both stubs with the 12-byte layouts, which may explain the JNI faults HWU saw after a buy.
+
+It runs on the cocos thread, so `showFromGame` posts the dialog to the UI thread and catches every `Throwable` so no exception is left pending in native code.
 
 The grant dispatcher is the native body of `DKSponsorPayOnChangeStatusError`. JNI resolves natives by short name, so the smali declaration was changed to `(II)V` and the native reads `r2` = wallet and `r3` = amount:
 
@@ -170,3 +175,5 @@ HSS has no `tutorialWaitForTap` in `assets/hss.lua` (the HWU acceptance-letter h
 Phone: LG Wing, Android 10, not rooted.
 
 - Unpatched 5.4.0: reaches the campus offline (level 1, 3500 coins, 499 rings, 15 books, "Admit your Classmate" tutorial step, gear on the HUD).
+- 1.0.0 (fresh install, 2026-11-25): new game started with no network to Pixelberry, character creation, hangouts, admissions and the scripted tutorial ran through to level 2 and the first "More Decor" quest. Settings → SETTINGS → GENERAL shows RR MOD. Tapping it aborted the process (stack alignment, above).
+- 1.0.1 installed over 1.0.0 with the same key; the level-2 save loaded.

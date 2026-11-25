@@ -15,7 +15,7 @@ This repository does **not** contain the game. High School Story is copyright Pi
 | 32-bit libraries also packaged as `armeabi-v7a` | Many phones dropped the old `armeabi` ABI name. |
 | Store offline | `canPurchase`, `hasProduct` and `areProductsAvailable` no longer depend on Google Play. A buy credits the product's own reward from the game config into the local save. |
 | Account and network gates | The "create an account" step and the "Network error. Cannot access currency store" cards are skipped. |
-| Store-card locks | "Unlocks with Quest" and similar store-card locks no longer block a buy. Quests themselves still run on the game's own logic. |
+| Store-card locks | "Unlocks with Quest", level-gated classmates, the Decor tab, makeovers and date-locked clothes no longer block a buy. Quests themselves still run on the game's own logic. |
 | Calls after a buy | Sound, telemetry, LeanPlum, sale-date checks and the reward scene, which call into Java after a buy, are skipped. |
 | RR Mod Settings | Settings → **RR MOD** (the old ABOUT row) adds coins, rings, books, pencils, tickets or XP, and exports or imports the save. |
 
@@ -43,7 +43,7 @@ Every native patch is matched against the original 5.4.0 bytes first. Another ve
 
 1. A copy signed by Pixelberry cannot be updated in place. Uninstalling it deletes its save.
 2. Install the patched APK. Play Protect will say it has not seen this developer. Choose **Install anyway**.
-3. Open Settings (the gear on the map) and tap **RR MOD** for currency and save export/import.
+3. Open Settings (the gear on the map), the SETTINGS tab, and tap **RR MOD** for currency and save export/import.
 
 The client ships only 32-bit ARM code. Phones without 32-bit support (for example the Galaxy S24 and later) cannot run it.
 

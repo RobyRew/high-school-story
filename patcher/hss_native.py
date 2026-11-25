@@ -78,9 +78,14 @@ RETURN_TRUE = {
     0x3F4B8C: "70b5ca6e",  # StoreLogic::isCurrencyClothingUnlocked
     0x3F4C28: "10b58823",  # StoreLogic::hasQuestIdUnlocked ("Unlocks with Quest")
     0x3D6EE4: "38b5051c",  # ClothingLogic::isClothingUnlocked
+    0x3F5BF0: "38b5051c",  # StoreLogic::isDecorationStoreUnlocked (Decor tab)
+    0x3CE3C4: "10b50ff0",  # CharacterLogic::isMakeoverUnlocked
+    # Classmate cards gated by player level or by owning a building of type 10.
+    0x3CE2A4: "70b5041c",  # CharacterLogic::canPurchaseCharacterType
 }
 RETURN_FALSE = {
     0x3D6E00: "f8b5061c",  # ClothingLogic::isLocked
+    0x3D6DB8: "38b5081c",  # ClothingLogic::isLockedByUnlockDateTime
 }
 SET_LOCKED = 0x4AD47C  # Store::StoreItem::setLocked(bool)
 # testPurchase return codes 4, 4 and 6 are requirement failures (level, quest,
@@ -249,7 +254,8 @@ def local_purchase() -> bytes:
     then tells the store listeners the buy completed. No Google Play call.
     """
     a = _Asm(PURCHASE)
-    a.emit(_hw(0xB530))  # push {r4, r5, lr}
+    # Four registers keep sp 8-byte aligned (AAPCS) for the calls below.
+    a.emit(_hw(0xB570))  # push {r4, r5, r6, lr}
     a.emit(_mov_low(4, 0))
     a.emit(_mov_low(5, 1))
     a.bl(SHARED_LOGIC_MANAGER)
@@ -261,7 +267,7 @@ def local_purchase() -> bytes:
     a.emit(_mov_low(0, 4))
     a.emit(_mov_low(1, 5))
     a.bl(FIRE_PURCHASE_COMPLETED)
-    a.emit(_hw(0xBD30))  # pop {r4, r5, pc}
+    a.emit(_hw(0xBD70))  # pop {r4, r5, r6, pc}
     blob = a.finish()
     if len(blob) > PURCHASE_SIZE:
         raise RuntimeError("local purchase does not fit")
@@ -302,11 +308,16 @@ def grant_dispatcher() -> bytes:
 
 
 def menu_cave() -> bytes:
-    """Call OfflineMenu.showFromGame() through JniHelper from the cocos thread."""
+    """Call OfflineMenu.showFromGame() through JniHelper from the cocos thread.
+
+    push {r4, lr} plus a 16-byte frame keeps sp 8-byte aligned. The HWU cave
+    used a 12-byte frame (sp off by 4); in HSS that faulted inside
+    JNI FindClass on the LG Wing.
+    """
     body = bytearray(
         bytes.fromhex(
             "10b5"  # push {r4, lr}
-            "83b0"  # sub sp, #12
+            "84b0"  # sub sp, #16 (12 for JniMethodInfo, 4 for alignment)
             "6846"  # mov r0, sp
             "0000"  # ldr r1, [pc, #?]
             "7944"  # add r1, pc
@@ -325,11 +336,11 @@ def menu_cave() -> bytes:
             "a400"  # lsls r4, r4, #2    CallStaticVoidMethod
             "1c59"  # ldr r4, [r3, r4]
             "a047"  # blx r4
-            "03b0"  # done: add sp, #12
+            "04b0"  # done: add sp, #16
             "10bd"  # pop {r4, pc}
         )
     )
-    done = body.find(bytes.fromhex("03b010bd"))
+    done = body.find(bytes.fromhex("04b010bd"))
     beq = body.find(bytes.fromhex("002800d0")) + 2
     body[beq : beq + 2] = _b_cond(MENU_CAVE + beq, EQ, MENU_CAVE + done)
     call = body.find(bytes.fromhex("00000000"))
